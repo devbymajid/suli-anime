@@ -13,7 +13,7 @@
 // torii gate, stone plaza/paths and props (env.js), plus circle colliders
 // resolved in the walk loop so the player cannot walk through buildings.
 import * as THREE from 'three';
-import { loadVRM, poseVRM, fitVRM, baseRenderer, shadowDisc, nameSprite, buildCreatorEnv, buildVillageEnv, buildHomeEnv } from './env.js';
+import { loadVRM, poseVRM, fitVRM, baseRenderer, shadowDisc, nameSprite, buildCreatorEnv, buildVillageEnv, buildHomeEnv, storedQuality, setStoredQuality, resolveQuality } from './env.js';
 import { Player, FollowCamera, FixedCamera, createInput } from './player.js';
 import { buildCharacter, fitHeight } from './characters-v4.js';
 import { PROFILES, getProfile, saveProfileOverride, resetProfileOverride } from './profiles.js';
@@ -121,6 +121,10 @@ function makeWalkScreen(opts) {
   let renderer, scene, camera, player, camFollow, input, disc, loop = makeLoop();
   let npcs = null; // v1.2: village NPC groups for tap-to-profile (room: none)
   let colliders = null, envStats = null; // v1.4: village circle colliders + stats (room: none)
+  let camManualYaw = null; // v1.4.1: drag-to-rotate — null = follow mode
+  // (camera swings behind the player); once the user drags the camera, the
+  // chosen yaw is held — FollowCamera.update would otherwise lerp it back
+  // toward the player's facing every frame.
   const npcRay = new THREE.Raycaster();
   // v1.2: raycast the NPC groups for a tap (normalized device coords).
   // On a hit, open that character's profile and return true so the tap does
@@ -162,6 +166,9 @@ function makeWalkScreen(opts) {
       poseVRM(av);
       fitVRM(av, 1.45, 0);
       tintVRM(av, getStoredAppearance('kaito')); // v1.3: saved colors
+      // v1.4.1: the player casts a real shadow on high quality (opaque
+      // meshes only — a transparent mesh would cast a solid blob).
+      av.traverse((o) => { if (o.isMesh && !(o.material && o.material.transparent)) o.castShadow = true; });
       // name label above the player (added AFTER fitVRM so it is not in the box)
       // v1.3: uses the edited profile name (set at screen init; a rename
       // shows here after reload).
@@ -181,6 +188,40 @@ function makeWalkScreen(opts) {
       input = createInput($(opts.joy), $(opts.knob), renderer.domElement, camera,
         (pt) => player.setTarget(pt.x, pt.z),
         npcs ? (nx, ny) => pickNPC(nx, ny) : undefined); // v1.2: NPC taps first
+      // v1.4.1: drag-to-rotate the follow camera (village only — the room's
+      // FixedCamera has no yaw). Dragging on empty canvas orbits the camera
+      // around Kaito; the new angle persists until the next drag. A short
+      // press (<10px) is still a tap — tap-to-move and NPC taps are handled
+      // by player.js on pointerup (its own 12px threshold), and drags that
+      // start on the joystick never reach the canvas (separate element), so
+      // walking is unaffected. Touch + mouse both come through as pointer
+      // events; the .vp CSS already sets touch-action:none so a touch drag
+      // is not hijacked by scrolling.
+      if (camFollow instanceof FollowCamera) {
+        const cv = renderer.domElement;
+        const DRAG_THRESHOLD = 10; // px of movement before a press becomes a drag
+        const DRAG_SENS = 0.005;   // camera yaw radians per px of horizontal drag
+        let drag = null; // { id, lastX, lastY, moved }
+        cv.addEventListener('pointerdown', (e) => {
+          if (drag) return; // single-pointer only
+          if (e.pointerType === 'mouse' && e.button !== 0) return;
+          drag = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY, moved: 0 };
+          try { cv.setPointerCapture(e.pointerId); } catch (err) { /* no capture — the drag still works while the pointer stays over the canvas */ }
+        });
+        cv.addEventListener('pointermove', (e) => {
+          if (!drag || e.pointerId !== drag.id) return;
+          const dx = e.clientX - drag.lastX, dy = e.clientY - drag.lastY;
+          drag.lastX = e.clientX; drag.lastY = e.clientY;
+          drag.moved += Math.hypot(dx, dy);
+          if (drag.moved < DRAG_THRESHOLD) return;
+          if (camManualYaw === null) camManualYaw = camFollow.yaw;
+          camManualYaw -= dx * DRAG_SENS; // drag right -> camera turns right (view pans right)
+          camFollow.yaw = camManualYaw;
+        });
+        const endDrag = (e) => { if (drag && e.pointerId === drag.id) drag = null; };
+        cv.addEventListener('pointerup', endDrag);
+        cv.addEventListener('pointercancel', endDrag);
+      }
       $(opts.load).classList.add('hidden');
       ready = true;
       window.__suli.ready[opts.name] = true;
@@ -217,6 +258,15 @@ function makeWalkScreen(opts) {
           }
         }
         camFollow.update(dt, player);
+        // v1.4.1: hold the user's chosen camera angle. FollowCamera.update
+        // lerps yaw back toward the player's facing, so re-apply the manual
+        // yaw after it; _apply's position lerp keeps the motion smooth.
+        // (At very low fps the double _apply biases the camera a few
+        // degrees toward the facing direction — negligible on a real phone.)
+        if (camManualYaw !== null && camFollow instanceof FollowCamera) {
+          camFollow.yaw = camManualYaw;
+          camFollow._apply(player, Math.min(1, dt * 6));
+        }
         disc.position.x = player.position.x;
         disc.position.z = player.position.z;
         renderer.render(scene, camera);
@@ -232,6 +282,24 @@ function makeWalkScreen(opts) {
     },
     playerPos() { return ready ? { x: player.position.x, z: player.position.z } : null; },
     isReady() { return ready; },
+    // v1.4.1 test hook: follow-camera yaw in radians (village only; null
+    // in the room / before init)
+    cameraYaw() { return ready && camFollow instanceof FollowCamera ? camFollow.yaw : null; },
+    // v1.4.1 test hooks: Kaito's on-screen height (fraction of the viewport
+    // height, feet y=0 to head y≈1.45) + camera position + renderer quality
+    kaitoSpan() {
+      if (!ready) return null;
+      const p = player.position;
+      const top = new THREE.Vector3(p.x, p.y + 1.45, p.z).project(camera);
+      const bot = new THREE.Vector3(p.x, p.y, p.z).project(camera);
+      return Math.abs(top.y - bot.y) / 2; // NDC spans -1..1 = full viewport height
+    },
+    cameraPos() { return ready ? { x: camera.position.x, y: camera.position.y, z: camera.position.z } : null; },
+    quality() {
+      if (!ready) return null;
+      const attrs = renderer.getContext().getContextAttributes();
+      return { pixelRatio: renderer.getPixelRatio(), shadows: renderer.shadowMap.enabled, antialias: !!(attrs && attrs.antialias) };
+    },
     // v1.4 test hooks: render stats + village inventory (colliders/stats)
     perf() {
       if (!ready) return null;
@@ -276,7 +344,10 @@ const villageScreen = makeWalkScreen({
   env: buildVillageEnv,
   bounds: { minX: -6.5, maxX: 6.5, minZ: -6, maxZ: 6.5 },
   start: { x: 0, z: 2.5, ry: 0 }, // facing -Z, down the path toward the houses
-  camDist: 4.6, camHeight: 2.7,
+  // v1.4.1: closer follow camera (was 4.6) — Kaito reads bigger and
+  // sharper on the phone. Height unchanged (2.7), so the camera still
+  // passes under the torii beams (y 2.95/3.42).
+  camDist: 3.4, camHeight: 2.7,
 });
 const roomScreen = makeWalkScreen({
   name: 'room', vp: '#roomVp', load: '#roomLoad', joy: '#joyRoom', knob: '#knobRoom',
@@ -961,6 +1032,22 @@ const socialUI = (() => {
     $('#editReset').addEventListener('click', resetEditForm);
     $('#editName').addEventListener('input', updateEditCounters);
     $('#editBio').addEventListener('input', updateEditCounters);
+    // v1.4.1: render-quality setting (account screen). Changing it reloads
+    // the page so every renderer is recreated with the new quality —
+    // antialias is fixed when the WebGL context is created and cannot
+    // change live. The 350ms delay lets the tap feedback show first.
+    const qSeg = $('#qualitySeg');
+    if (qSeg) {
+      const cur = storedQuality();
+      qSeg.querySelectorAll('div').forEach((d) => d.classList.toggle('on', d.dataset.q === cur));
+      qSeg.addEventListener('click', (e) => {
+        const d = e.target.closest('[data-q]');
+        if (!d || d.dataset.q === storedQuality()) return;
+        qSeg.querySelectorAll('div').forEach((x) => x.classList.toggle('on', x === d));
+        setStoredQuality(d.dataset.q);
+        setTimeout(() => window.location.reload(), 350);
+      });
+    }
     renderFriends();
     renderMyProfile();
   }
@@ -980,7 +1067,7 @@ const screens = {
 let current = 'home';
 
 window.__suli = {
-  version: '1.4.0',
+  version: '1.4.1',
   screen: 'home',
   ready: {},
   playerPos: (name) => {
@@ -992,6 +1079,10 @@ window.__suli = {
   creatorMaterials: () => creatorScreen.debugMaterials(),
   villagePerf: () => villageScreen.perf(),
   villageInfo: () => villageScreen.info(),
+  cameraYaw: () => villageScreen.cameraYaw(), // v1.4.1: follow-camera yaw (rad)
+  kaitoSpan: () => villageScreen.kaitoSpan(), // v1.4.1: Kaito's on-screen height (viewport fraction)
+  cameraPos: () => villageScreen.cameraPos(), // v1.4.1: village camera position
+  quality: () => ({ stored: storedQuality(), resolved: resolveQuality(), renderer: villageScreen.quality() }), // v1.4.1
 };
 
 async function show(name) {

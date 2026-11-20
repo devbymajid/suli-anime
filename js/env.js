@@ -94,10 +94,60 @@ function nameSprite(text, sub, s) {
   return sp;
 }
 
+// ---- v1.4.1 render quality ----
+// Stored in localStorage 'suli-quality': 'auto' (default — high on strong
+// devices, reduced on weak ones), 'high' (forced) or 'low'. Read at
+// renderer creation, so changing the setting reloads the page (antialias
+// is fixed when the WebGL context is created and cannot change live).
+const QUALITY_KEY = 'suli-quality';
+function storedQuality() {
+  try {
+    const v = localStorage.getItem(QUALITY_KEY);
+    return (v === 'high' || v === 'low' || v === 'auto') ? v : 'auto';
+  } catch (e) { return 'auto'; }
+}
+function setStoredQuality(v) {
+  try { localStorage.setItem(QUALITY_KEY, v); } catch (e) { /* private mode — keep the default */ }
+}
+// Auto: high when the device looks strong. deviceMemory is Chrome-only;
+// when it is missing (Safari), cores alone decide — modern iPhones
+// report 6.
+function autoQuality() {
+  const cores = navigator.hardwareConcurrency || 4;
+  const mem = navigator.deviceMemory; // GB, undefined on Safari
+  if (mem !== undefined) return (cores >= 6 && mem >= 4) ? 'high' : 'low';
+  return cores >= 6 ? 'high' : 'low';
+}
+function resolveQuality() {
+  const s = storedQuality();
+  return s === 'auto' ? autoQuality() : s;
+}
+function qualitySettings() {
+  const q = resolveQuality();
+  return q === 'high'
+    ? { level: 'high', pixelRatio: Math.min(window.devicePixelRatio || 1, 2), antialias: true, shadows: true }
+    : { level: 'low', pixelRatio: 1, antialias: false, shadows: false };
+}
+
 function baseRenderer(container, w, h, alpha) {
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: !!alpha });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  // v1.4.1: quality comes from the stored setting — high = full pixel
+  // ratio + antialias + PCFSoft shadows; low = 1x pixels, no antialias,
+  // no shadows. ACES tone mapping + sRGB output apply at both levels
+  // (no measurable perf cost, nicer highlights). NOTE: pixelRatio (capped
+  // at 2) and antialias were already on in v1 — the visible sharpness gain
+  // in this release comes mostly from the closer village camera (main.js)
+  // plus the tone mapping; the setting's real job is letting weak phones
+  // trade pixels/shadows for speed.
+  const q = qualitySettings();
+  const renderer = new THREE.WebGLRenderer({ antialias: q.antialias, alpha: !!alpha });
+  renderer.setPixelRatio(q.pixelRatio);
   renderer.setSize(w, h);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.outputColorSpace = THREE.SRGBColorSpace; // default in r160 — explicit
+  if (q.shadows) {
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  }
   container.appendChild(renderer.domElement);
   return renderer;
 }
@@ -105,8 +155,33 @@ function lights(scene, sky, ground, sunColor, sunI) {
   scene.add(new THREE.HemisphereLight(sky, ground, 0.85));
   const dl = new THREE.DirectionalLight(sunColor || 0xffffff, sunI || 1.1);
   dl.position.set(4, 7, 4); scene.add(dl);
+  // v1.4.1: the sun casts shadows when the renderer has shadow maps on
+  // (high quality — harmless otherwise: three.js skips shadow rendering
+  // entirely when shadowMap.enabled is false). Orthographic frustum
+  // covers the whole village/room; the bias values keep the procedural
+  // walls acne-free.
+  dl.castShadow = true;
+  dl.shadow.mapSize.set(1024, 1024);
+  dl.shadow.camera.left = -9; dl.shadow.camera.right = 9;
+  dl.shadow.camera.top = 9; dl.shadow.camera.bottom = -9;
+  dl.shadow.camera.near = 0.5; dl.shadow.camera.far = 30;
+  dl.shadow.bias = -0.0005;
+  dl.shadow.normalBias = 0.02;
   const fill = new THREE.DirectionalLight(0xffffff, 0.35);
   fill.position.set(-5, 3, -2); scene.add(fill);
+}
+// v1.4.1: shadow flags — every opaque mesh casts + receives; transparent
+// meshes (NPC hit cylinders, blob shadow discs) and meshes tagged noCast
+// (flat ground planes) receive only. Called at the end of each env
+// builder; the renderer flag (high quality) decides whether shadows
+// actually render. The player VRM is flagged in main.js (it is added
+// after the env builder returns).
+function applyShadowFlags(scene) {
+  scene.traverse((o) => {
+    if (!o.isMesh) return;
+    o.receiveShadow = true;
+    o.castShadow = !(o.material && o.material.transparent) && !o.userData.noCast;
+  });
 }
 
 // ================= CREATOR / HOME PREVIEW: avatar on a pedestal =================
@@ -251,14 +326,21 @@ function buildVillageEnv(scene) {
   scene.background = new THREE.Color(P.sky);
   scene.fog = new THREE.Fog(P.sky, 16, 34);
   lights(scene, P.sky, P.ground, P.sun, 1.0);
-  scene.add(mesh(new THREE.PlaneGeometry(40, 40), mat(P.ground), 0, 0, 0, -Math.PI / 2, 0, 0));
+  // v1.4.1: ground planes receive shadows but never cast (flat on the floor)
+  const groundPlane = mesh(new THREE.PlaneGeometry(40, 40), mat(P.ground), 0, 0, 0, -Math.PI / 2, 0, 0);
+  groundPlane.userData.noCast = true;
+  scene.add(groundPlane);
   // v1.4: cobbled main path + central stone plaza (flat ground detail, no colliders)
   const cobblePath = canvasTex(256, 256, drawCobble, 1, 8);
-  scene.add(mesh(new THREE.PlaneGeometry(2.4, 16),
-    new THREE.MeshLambertMaterial({ map: cobblePath, color: 0xd9c9a3 }), 0, 0.03, 1.5, -Math.PI / 2, 0, 0));
+  const pathMesh = mesh(new THREE.PlaneGeometry(2.4, 16),
+    new THREE.MeshLambertMaterial({ map: cobblePath, color: 0xd9c9a3 }), 0, 0.03, 1.5, -Math.PI / 2, 0, 0);
+  pathMesh.userData.noCast = true;
+  scene.add(pathMesh);
   const cobblePlaza = canvasTex(256, 256, drawCobble, 2, 2);
-  scene.add(mesh(new THREE.CircleGeometry(2.4, 36),
-    new THREE.MeshLambertMaterial({ map: cobblePlaza, color: 0xe8d9b8 }), 0, 0.02, 1.0, -Math.PI / 2, 0, 0));
+  const plazaMesh = mesh(new THREE.CircleGeometry(2.4, 36),
+    new THREE.MeshLambertMaterial({ map: cobblePlaza, color: 0xe8d9b8 }), 0, 0.02, 1.0, -Math.PI / 2, 0, 0);
+  plazaMesh.userData.noCast = true;
+  scene.add(plazaMesh);
 
   // ---- v1.4 shared materials (one instance each, reused by every building) ----
   const woodTex = canvasTex(128, 128, drawWoodPlanks);
@@ -561,6 +643,8 @@ function buildVillageEnv(scene) {
     scene.add(sp);
     handles.push({ key: p.key, group: a });
   }
+  // v1.4.1: shadow flags for the whole village (no-op on low quality)
+  applyShadowFlags(scene);
   // v1.4: colliders + a stats inventory for tests/NOTES.md
   return {
     npcs: handles,
@@ -579,7 +663,9 @@ function buildHomeEnv(scene) {
   scene.background = new THREE.Color(P.sky);
   lights(scene, 0xfff6e5, P.floor, 0xfff2dd, 1.0);
   const lampLight = new THREE.PointLight(0xffd9a0, 0.9, 8); lampLight.position.set(-2.6, 2.2, 1.2); scene.add(lampLight);
-  scene.add(mesh(new THREE.PlaneGeometry(16, 12), mat(P.floor), 0, 0, 0.5, -Math.PI / 2, 0, 0));
+  const floorPlane = mesh(new THREE.PlaneGeometry(16, 12), mat(P.floor), 0, 0, 0.5, -Math.PI / 2, 0, 0);
+  floorPlane.userData.noCast = true; // v1.4.1: receives shadows, never casts
+  scene.add(floorPlane);
   scene.add(mesh(new THREE.PlaneGeometry(16, 4.2), mat(P.wall), 0, 2.1, -4, 0, 0, 0));
   const lw = mesh(new THREE.PlaneGeometry(12, 4.2), mat(P.wallSide), -5.5, 2.1, 0.5, 0, Math.PI / 2, 0);
   scene.add(lw);
@@ -645,6 +731,8 @@ function buildHomeEnv(scene) {
   cat.add(mesh(new THREE.ConeGeometry(0.045, 0.09, 4), mat(0xf5f0e6), 0.22, 0.42, 0.05));
   cat.position.set(-1.2, 0.03, 1.9);
   scene.add(cat);
+  // v1.4.1: shadow flags for the whole room (no-op on low quality)
+  applyShadowFlags(scene);
 }
 
-export { P, loadVRM, poseVRM, fitVRM, baseRenderer, lights, shadowDisc, nameSprite, buildCreatorEnv, buildVillageEnv, buildHomeEnv };
+export { P, loadVRM, poseVRM, fitVRM, baseRenderer, lights, shadowDisc, nameSprite, buildCreatorEnv, buildVillageEnv, buildHomeEnv, storedQuality, setStoredQuality, resolveQuality, qualitySettings };
