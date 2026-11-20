@@ -67,6 +67,8 @@ function shadowDisc(x, z, r, y) {
 // ---- Name label sprite (Arabic text on canvas) ----
 // s scales the sprite: the follow camera sits much closer than the v5 static
 // shots, so in-game labels use s=0.45 (a full-size label would fill the phone).
+// v1.4.2: no call sites remain — the labels were removed on the user's
+// request; the function is kept (unused) in case they ever return.
 function nameSprite(text, sub, s) {
   s = s || 1;
   const c = document.createElement('canvas'); c.width = 288; c.height = sub ? 96 : 72;
@@ -638,9 +640,8 @@ function buildVillageEnv(scene) {
     a.add(hit);
     scene.add(a);
     scene.add(shadowDisc(p.x, p.z, 0.42));
-    const sp = nameSprite(p.name, p.sub, 0.45);
-    sp.position.set(p.x, 2.15, p.z);
-    scene.add(sp);
+    // v1.4.2: no name label above NPCs — removed on the user's request
+    // ("lvitas"). Name + level still show in the profile sheet.
     handles.push({ key: p.key, group: a });
   }
   // v1.4.1: shadow flags for the whole village (no-op on low quality)

@@ -13,7 +13,7 @@
 // torii gate, stone plaza/paths and props (env.js), plus circle colliders
 // resolved in the walk loop so the player cannot walk through buildings.
 import * as THREE from 'three';
-import { loadVRM, poseVRM, fitVRM, baseRenderer, shadowDisc, nameSprite, buildCreatorEnv, buildVillageEnv, buildHomeEnv, storedQuality, setStoredQuality, resolveQuality } from './env.js';
+import { loadVRM, poseVRM, fitVRM, baseRenderer, shadowDisc, buildCreatorEnv, buildVillageEnv, buildHomeEnv, storedQuality, setStoredQuality, resolveQuality } from './env.js';
 import { Player, FollowCamera, FixedCamera, createInput } from './player.js';
 import { buildCharacter, fitHeight } from './characters-v4.js';
 import { PROFILES, getProfile, saveProfileOverride, resetProfileOverride } from './profiles.js';
@@ -169,12 +169,9 @@ function makeWalkScreen(opts) {
       // v1.4.1: the player casts a real shadow on high quality (opaque
       // meshes only — a transparent mesh would cast a solid blob).
       av.traverse((o) => { if (o.isMesh && !(o.material && o.material.transparent)) o.castShadow = true; });
-      // name label above the player (added AFTER fitVRM so it is not in the box)
-      // v1.3: uses the edited profile name (set at screen init; a rename
-      // shows here after reload).
-      const label = nameSprite(getProfile('kaito').name, 'المستوى 5', 0.45);
-      label.position.set(0, 2.05, 0);
-      av.add(label);
+      // v1.4.2: no name label above the player — removed on the user's
+      // request ("lvitas"). Name + level still show in the profile
+      // sheet, the account screen and the creator.
       scene.add(av);
       player = new Player(av, opts.bounds, opts.start);
       disc = shadowDisc(opts.start.x, opts.start.z, 0.45, 0.045);
@@ -1067,7 +1064,7 @@ const screens = {
 let current = 'home';
 
 window.__suli = {
-  version: '1.4.1',
+  version: '1.4.2',
   screen: 'home',
   ready: {},
   playerPos: (name) => {
