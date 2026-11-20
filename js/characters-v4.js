@@ -8,6 +8,9 @@
 //   sara  — girl, brown shoulder hair, purple eyes, white cat tee + plaid skirt
 //   layan — girl, dark shoulder hair, brown eyes, oversized black hoodie
 // Characters face +Z, feet at y=0, nominal height ~1.6 (fit via bounding box).
+// v1.3: buildCharacter(key, app) accepts appearance overrides
+// { haircolor, skin, eyecolor, outfitcolor } (hex strings) — the live colors
+// from the creator. Without them the spec colors are used, unchanged.
 import * as THREE from 'three';
 
 const SKIN = 0xffd9b3;
@@ -52,7 +55,7 @@ function plaidTexture() {
 
 // ================= FACE =================
 function buildFace(g, spec, headY) {
-  const skinM = mat(SKIN);
+  const skinM = mat(spec.skin);
   // head
   const head = mesh(new THREE.SphereGeometry(0.115, 24, 18), skinM, 0, headY, 0);
   head.scale.set(0.92, 1.08, 0.95);
@@ -150,7 +153,7 @@ function buildHair(g, spec, headY) {
 
 // ================= BODY =================
 function buildBody(g, spec) {
-  const skinM = mat(SKIN);
+  const skinM = mat(spec.skin);
   const torsoR = spec.gender === 'f' ? 0.098 : 0.105;
   const outfitM = mat(spec.outfitColor);
   // neck
@@ -224,8 +227,9 @@ function buildBody(g, spec) {
     dg.rotation.z = 0.5; g.add(dg);
   }
   if (spec.outfit === 'skirt') {
-    // plaid pleated skirt
-    const skirtM = new THREE.MeshLambertMaterial({ map: plaidTexture() });
+    // plaid pleated skirt (v1.3: outfit color tints the plaid; the default
+    // #f5f5f5 leaves it unchanged)
+    const skirtM = new THREE.MeshLambertMaterial({ map: plaidTexture(), color: spec.outfitColor });
     g.add(mesh(new THREE.CylinderGeometry(0.092, 0.155, 0.24, 24, 1, true), skirtM, 0, 0.70, 0));
     const wb = mesh(new THREE.TorusGeometry(0.092, 0.012, 8, 24), mat(0x5b7fa6), 0, 0.815, 0);
     wb.rotation.x = Math.PI / 2; g.add(wb);
@@ -274,14 +278,30 @@ const SPECS = {
 };
 
 // Build a full character group (faces +Z, feet at y=0). Returns THREE.Group.
-function buildCharacter(key) {
-  const spec = SPECS[key];
-  if (!spec) throw new Error('unknown character ' + key);
+// `app` (v1.3, optional): { haircolor, skin, eyecolor, outfitcolor } hex
+// strings from the creator — they override the spec colors for this build.
+function buildCharacter(key, app) {
+  const spec = Object.assign({}, SPECS[key]);
+  if (!spec || !SPECS[key]) throw new Error('unknown character ' + key);
+  if (app) {
+    if (app.haircolor) spec.hair = app.haircolor;
+    if (app.eyecolor) spec.eye = app.eyecolor;
+    if (app.outfitcolor) spec.outfitColor = app.outfitcolor;
+    if (app.skin) spec.skin = app.skin;
+  }
+  if (spec.skin === undefined) spec.skin = SKIN;
   const g = new THREE.Group();
   const headY = 1.39;
   buildFace(g, spec, headY);
   buildHair(g, spec, headY);
   buildBody(g, spec);
+  // v1.3: the colors this build used (for the creator test hook).
+  g.userData.appliedAppearance = {
+    haircolor: '#' + new THREE.Color(spec.hair).getHexString(),
+    skin: '#' + new THREE.Color(spec.skin).getHexString(),
+    eyecolor: '#' + new THREE.Color(spec.eye).getHexString(),
+    outfitcolor: '#' + new THREE.Color(spec.outfitColor).getHexString(),
+  };
   return g;
 }
 

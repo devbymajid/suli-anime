@@ -1,10 +1,15 @@
-// Suli Anime v1.2 — character profiles for the village social feature.
+// Suli Anime v1.3 — character profiles for the village social feature.
 // Original characters only: no real anime titles, no real anime characters.
 // Levels MUST match the live game (sara 12, yusuf 8, layan 15, kaito 5).
 // `replies` are scripted chat lines in the character's voice; each line may
 // carry `keys` (Arabic keywords that trigger it). `fallbacks` are generic
 // replies used between full cycles through `replies`. Everything is local:
 // there is no backend and no multiplayer yet, so chats are scripted.
+// v1.3: the PLAYER edits only his own profile (kaito) — NPC profiles are
+// read-only. Edits live in localStorage 'suli-profile-overrides' and
+// getProfile(key) merges them over the base data, so every consumer (sheet,
+// friends list, chat header, account profile) reads the edited values
+// through this one path. Level, likes and replies are never editable.
 
 const PROFILES = {
   sara: {
@@ -88,4 +93,41 @@ const PROFILES = {
   },
 };
 
-export { PROFILES };
+// ---- v1.3: player profile overrides (kaito only, via the edit form) ----
+const OVERRIDE_KEY = 'suli-profile-overrides';
+
+function loadOverrides() {
+  try {
+    const raw = localStorage.getItem(OVERRIDE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+function saveOverrides(all) {
+  try { localStorage.setItem(OVERRIDE_KEY, JSON.stringify(all)); } catch (e) {}
+}
+// Merged profile: base data + the player's overrides (name / bio / traits /
+// interests only). Invalid override values fall back to the base data.
+function getProfile(key) {
+  const base = PROFILES[key];
+  if (!base) return null;
+  const o = loadOverrides()[key] || {};
+  const chips = (v) => (Array.isArray(v) && v.length === 3 && v.every((s) => typeof s === 'string' && s)) ? v : null;
+  return Object.assign({}, base, {
+    name: (typeof o.name === 'string' && o.name.trim()) ? o.name.trim() : base.name,
+    bio: (typeof o.bio === 'string' && o.bio.trim()) ? o.bio.trim() : base.bio,
+    traits: chips(o.traits) || base.traits,
+    interests: chips(o.interests) || base.interests,
+  });
+}
+function saveProfileOverride(key, patch) {
+  const all = loadOverrides();
+  all[key] = Object.assign({}, all[key] || {}, patch);
+  saveOverrides(all);
+}
+function resetProfileOverride(key) {
+  const all = loadOverrides();
+  delete all[key];
+  saveOverrides(all);
+}
+
+export { PROFILES, getProfile, saveProfileOverride, resetProfileOverride };

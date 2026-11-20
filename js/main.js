@@ -1,15 +1,20 @@
-// Suli Anime v1.2 — SPA controller.
+// Suli Anime v1.3 — SPA controller.
 // One render loop runs at a time: switching screens stops the previous
 // screen's loop and starts the new one. 3D screens init lazily on first
 // visit (each loads the kaito VRM once; the browser cache makes later
 // loads fast). No network use beyond the local files.
 // v1.2 adds the village social feature: tap an NPC to open their profile
 // (like / add friend / scripted chat), all stored in localStorage.
+// v1.3 adds character editing: (A) creator colors (hair/skin/eyes/outfit)
+// change the 3D model live and persist per character; (B) the player edits
+// his own profile (kaito) from the account screen — NPC profiles are
+// read-only. Saved appearance is applied everywhere a character appears.
 import * as THREE from 'three';
 import { loadVRM, poseVRM, fitVRM, baseRenderer, shadowDisc, nameSprite, buildCreatorEnv, buildVillageEnv, buildHomeEnv } from './env.js';
 import { Player, FollowCamera, FixedCamera, createInput } from './player.js';
 import { buildCharacter, fitHeight } from './characters-v4.js';
-import { PROFILES } from './profiles.js';
+import { PROFILES, getProfile, saveProfileOverride, resetProfileOverride } from './profiles.js';
+import { getAppearance, getStoredAppearance, saveAppearance, diffAppearance, tintVRM } from './appearance.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -77,6 +82,7 @@ const homeScreen = (() => {
       }
       poseVRM(model);
       fitVRM(model, 1.6, 0.22);
+      tintVRM(model, getStoredAppearance('kaito')); // v1.3: saved colors
       model.rotation.y = Math.PI - 0.45;
       scene.add(model);
       $('#homeLoad').classList.add('hidden');
@@ -149,8 +155,11 @@ function makeWalkScreen(opts) {
       }
       poseVRM(av);
       fitVRM(av, 1.45, 0);
+      tintVRM(av, getStoredAppearance('kaito')); // v1.3: saved colors
       // name label above the player (added AFTER fitVRM so it is not in the box)
-      const label = nameSprite('كايتو', 'المستوى 5', 0.45);
+      // v1.3: uses the edited profile name (set at screen init; a rename
+      // shows here after reload).
+      const label = nameSprite(getProfile('kaito').name, 'المستوى 5', 0.45);
       label.position.set(0, 2.05, 0);
       av.add(label);
       scene.add(av);
@@ -265,8 +274,9 @@ const creatorScreen = (() => {
     char: 'kaito', name: 'كايتو', gender: 'm', height: 175, athletic: true,
     hairstyle: 'short', haircolor: '#4a2c2a', face: 'round',
     eyecolor: '#4a2c2a', eyeshape: 'big', build: 'medium',
-    outfit: 'hoodie-white', skin: '#ffd9b3',
+    outfit: 'hoodie-white', outfitcolor: '#f5f5f5', skin: '#ffd9b3',
   };
+  if (!state.outfitcolor) state.outfitcolor = '#f5f5f5'; // v1.3: old saves
 
   function loadSaved() {
     try {
@@ -282,7 +292,10 @@ const creatorScreen = (() => {
     group.scale.set(hs * w, hs, hs * w);
   }
 
-  async function setPreviewChar(key) {
+  // v1.3: `appOverride` (live, unsaved colors from the dots) previews
+  // colors without saving; without it the SAVED appearance is applied, so
+  // switching characters always resets the preview to what is saved.
+  async function setPreviewChar(key, appOverride) {
     currentChar = key;
     state.char = key;
     if (currentModel) { group.remove(currentModel); currentModel = null; }
@@ -293,8 +306,9 @@ const creatorScreen = (() => {
         fitVRM(kaitoModel, 1.55, 0.22);
       }
       currentModel = kaitoModel;
+      tintVRM(currentModel, appOverride ? diffAppearance(key, appOverride) : getStoredAppearance(key));
     } else {
-      currentModel = buildCharacter(key);
+      currentModel = buildCharacter(key, appOverride || getAppearance(key));
       fitHeight(currentModel, 1.55, 0.22);
     }
     currentModel.rotation.y = Math.PI - 0.45;
@@ -310,12 +324,36 @@ const creatorScreen = (() => {
     });
   }
 
+  // v1.3: the four live colors, as currently picked in the creator.
+  function currentColors() {
+    return { haircolor: state.haircolor, skin: state.skin, eyecolor: state.eyecolor, outfitcolor: state.outfitcolor };
+  }
+  // v1.3: load a character's SAVED colors into the creator state + dots.
+  function syncCreatorColors(key) {
+    const app = getAppearance(key);
+    state.haircolor = app.haircolor;
+    state.skin = app.skin;
+    state.eyecolor = app.eyecolor;
+    state.outfitcolor = app.outfitcolor;
+    ['haircolor', 'skin', 'eyecolor', 'outfitcolor'].forEach((name) => {
+      const g = document.querySelector('[data-group="' + name + '"]');
+      if (!g) return;
+      g.querySelectorAll('.dot').forEach((o) => o.classList.toggle('on', o.dataset.v === String(app[name])));
+    });
+  }
+  // v1.3: a color dot was clicked — change the preview immediately
+  // (unsaved until «حفظ الشخصية»).
+  function applyLiveColors() {
+    if (!currentModel) return;
+    setPreviewChar(currentChar, currentColors()).catch(() => {});
+  }
+
   function buildThumb(el, key) {
     const w = el.clientWidth, h = el.clientHeight;
     if (w < 10 || h < 10) return;
     const r = baseRenderer(el, w, h, true);
     const sc = new THREE.Scene();
-    const av = buildCharacter(key);
+    const av = buildCharacter(key, getAppearance(key));
     const s = fitHeight(av, 1.5, 0);
     av.rotation.y = -0.25;
     sc.add(av);
@@ -336,6 +374,7 @@ const creatorScreen = (() => {
     const av = await loadVRM('dero.vrm');
     poseVRM(av);
     fitVRM(av, 1.5, 0);
+    tintVRM(av, getStoredAppearance('kaito')); // v1.3: saved colors
     av.rotation.y = Math.PI - 0.25;
     sc.add(av);
     sc.updateMatrixWorld(true);
@@ -367,6 +406,7 @@ const creatorScreen = (() => {
       camera.lookAt(0, 1.0, 0);
       try {
         await setPreviewChar(state.char);
+        syncCreatorColors(state.char); // v1.3: dots show the saved colors
         const thumbJobs = [];
         $$('.thumb3d').forEach((el) => {
           const key = el.dataset.char;
@@ -391,9 +431,11 @@ const creatorScreen = (() => {
     $$('.pick').forEach((p) => p.addEventListener('click', () => {
       const key = p.dataset.char;
       if (key === currentChar) return;
+      syncCreatorColors(key); // v1.3: dots show THIS character's saved colors
       setPreviewChar(key).catch(() => toast('تعذّر تحميل الشخصية'));
       // choosing a character sets the name field and the gender to its default
-      state.name = CHAR_NAMES[key];
+      // (v1.3: kaito's name comes from his edited profile, not the default)
+      state.name = key === 'kaito' ? getProfile('kaito').name : CHAR_NAMES[key];
       $('#charName').value = state.name;
       state.gender = (key === 'sara' || key === 'layan') ? 'f' : 'm';
       $$('#genderSeg div').forEach((d) => d.classList.toggle('on', d.dataset.g === state.gender));
@@ -417,6 +459,10 @@ const creatorScreen = (() => {
         opt.classList.add('on');
         if (opt.classList.contains('opt')) opt.insertAdjacentHTML('afterbegin', TICK);
         state[name] = opt.dataset.v;
+        // v1.3: color choices change the 3D preview immediately
+        if (name === 'haircolor' || name === 'skin' || name === 'eyecolor' || name === 'outfitcolor') {
+          applyLiveColors();
+        }
         // build choice mirrors the athletic switch
         if (name === 'build') {
           state.athletic = opt.dataset.v === 'sporty';
@@ -458,6 +504,19 @@ const creatorScreen = (() => {
     // save
     $('#saveCharBtn').addEventListener('click', () => {
       try { localStorage.setItem('suli-character', JSON.stringify(state)); } catch (e) {}
+      // v1.3: persist this character's colors (only changed fields stored)
+      saveAppearance(state.char, currentColors());
+      // v1.3: the creator name and the profile name are one identity — a
+      // rename of kaito here follows into his profile (NPC names are
+      // read-only, so this runs for kaito only).
+      if (state.char === 'kaito') saveProfileOverride('kaito', { name: state.name || 'كايتو' });
+      // v1.3: re-render this character's picker thumb with the new colors
+      const thumbEl = document.querySelector('.thumb3d[data-char="' + state.char + '"]');
+      if (thumbEl) {
+        thumbEl.innerHTML = '';
+        if (state.char === 'kaito') buildThumbVRM(thumbEl).catch(() => {});
+        else buildThumb(thumbEl, state.char);
+      }
       const nm = state.name || 'كايتو';
       $('#accName').textContent = nm;
       const heroName = $('#screen-home .name b');
@@ -507,6 +566,30 @@ const creatorScreen = (() => {
     },
     wireUI,
     getState() { return state; },
+    // v1.3 test hook: the colors the current preview model shows.
+    // Kaito (VRM): the tinted material colors. Code-built characters:
+    // the colors the rebuild used (see appliedAppearance).
+    debugMaterials() {
+      if (!currentModel) return null;
+      if (currentChar !== 'kaito') {
+        const a = currentModel.userData.appliedAppearance;
+        return a ? { hair: a.haircolor, skin: a.skin, eye: a.eyecolor, outfit: a.outfitcolor } : null;
+      }
+      const out = {};
+      currentModel.traverse((n) => {
+        if (!n.isMesh && !n.isSkinnedMesh) return;
+        const mats = Array.isArray(n.material) ? n.material : [n.material];
+        mats.forEach((m) => {
+          if (!m || !m.name || !m.color) return;
+          const hex = '#' + m.color.getHexString();
+          if (m.name.indexOf('_HAIR') !== -1) out.hair = hex;
+          else if (m.name.indexOf('_SKIN') !== -1) out.skin = hex;
+          else if (m.name.indexOf('EyeIris') !== -1) out.eye = hex;
+          else if (m.name.indexOf('_Tops_') !== -1) out.outfit = hex;
+        });
+      });
+      return out;
+    },
   };
 })();
 
@@ -544,8 +627,10 @@ const socialUI = (() => {
   }
 
   // ---- profile sheet ----
+  // v1.3: every consumer reads through getProfile (base + player overrides).
+  // NPC profiles have no overrides (read-only), kaito's can be edited.
   function renderProfile(key) {
-    const p = PROFILES[key];
+    const p = getProfile(key);
     $('#profileName').textContent = p.name;
     $('#profileLevel').textContent = 'المستوى ' + p.level;
     $('#profileLikes').textContent = likeCount(key);
@@ -585,7 +670,7 @@ const socialUI = (() => {
       preview.camera.lookAt(0, 0.75, 0);
     }
     if (preview.model) { preview.scene.remove(preview.model); preview.model = null; }
-    const av = buildCharacter(key);
+    const av = buildCharacter(key, getAppearance(key)); // v1.3: saved colors
     fitHeight(av, 1.5, 0);
     av.rotation.y = -0.25;
     preview.model = av;
@@ -633,10 +718,10 @@ const socialUI = (() => {
     let f = friends();
     if (isFriend(currentKey)) {
       f = f.filter((k) => k !== currentKey);
-      toast('تمت إزالة ' + PROFILES[currentKey].name + ' من الأصدقاء');
+      toast('تمت إزالة ' + getProfile(currentKey).name + ' من الأصدقاء');
     } else {
       f.push(currentKey);
-      toast('تمت إضافة ' + PROFILES[currentKey].name + ' كصديق');
+      toast('تمت إضافة ' + getProfile(currentKey).name + ' كصديق');
     }
     saveJSON('suli-friends', f);
     renderProfile(currentKey);
@@ -653,7 +738,7 @@ const socialUI = (() => {
       return;
     }
     list.innerHTML = f.map((key) => {
-      const p = PROFILES[key];
+      const p = getProfile(key);
       if (!p) return '';
       return '<div class="frow" data-friend="' + key + '">'
         + '<span class="frow-av" style="background:' + p.color + '">' + p.name.charAt(0) + '</span>'
@@ -696,7 +781,7 @@ const socialUI = (() => {
   function openChat(key) {
     if (!PROFILES[key]) return;
     chatKey = key;
-    const p = PROFILES[key];
+    const p = getProfile(key);
     $('#chatName').textContent = p.name;
     const av = $('#chatAvatar');
     av.textContent = p.name.charAt(0);
@@ -742,6 +827,82 @@ const socialUI = (() => {
     }, 1000);
   }
 
+  // ---- my profile (account screen) + edit form (v1.3) ----
+  // The player edits ONLY his own profile (kaito). NPC profiles are
+  // read-only and never show an edit button. Level and likes are not
+  // editable. Empty trait/interest/bio fields fall back to the defaults.
+  function renderMyProfile() {
+    const p = getProfile('kaito');
+    $('#myProfileName').textContent = p.name;
+    $('#myProfileLevel').textContent = 'المستوى ' + p.level;
+    $('#myProfileBio').textContent = p.bio;
+    $('#myProfileTraits').innerHTML = p.traits.map((t) => '<span class="chip warm">' + escapeHtml(t) + '</span>').join('');
+    $('#myProfileInterests').innerHTML = p.interests.map((t) => '<span class="chip">' + escapeHtml(t) + '</span>').join('');
+  }
+  function updateEditCounters() {
+    $('#editNameCount').textContent = $('#editName').value.length + '/20';
+    $('#editBioCount').textContent = $('#editBio').value.length + '/200';
+  }
+  function openEditForm() {
+    const p = getProfile('kaito');
+    $('#editName').value = p.name;
+    $('#editBio').value = p.bio;
+    p.traits.forEach((t, i) => { $('#editTrait' + i).value = t; });
+    p.interests.forEach((t, i) => { $('#editInterest' + i).value = t; });
+    updateEditCounters();
+    $('#editScrim').classList.add('show');
+    $('#editSheet').classList.add('show');
+  }
+  function closeEditForm() {
+    $('#editScrim').classList.remove('show');
+    $('#editSheet').classList.remove('show');
+  }
+  function saveEditForm() {
+    const name = $('#editName').value.trim();
+    if (!name) { toast('اكتب اسماً للشخصية'); return; }
+    const base = PROFILES.kaito;
+    const pick = (prefix, i, fallback) => {
+      const v = $('#' + prefix + i).value.trim();
+      return v || fallback;
+    };
+    saveProfileOverride('kaito', {
+      name,
+      bio: $('#editBio').value.trim() || base.bio,
+      traits: [pick('editTrait', 0, base.traits[0]), pick('editTrait', 1, base.traits[1]), pick('editTrait', 2, base.traits[2])],
+      interests: [pick('editInterest', 0, base.interests[0]), pick('editInterest', 1, base.interests[1]), pick('editInterest', 2, base.interests[2])],
+    });
+    // the creator name and the profile name are one identity — keep the
+    // creator save, the account stat and the home hero in sync
+    try {
+      const raw = localStorage.getItem('suli-character');
+      const st = raw ? JSON.parse(raw) : {};
+      st.name = name;
+      localStorage.setItem('suli-character', JSON.stringify(st));
+    } catch (e) {}
+    $('#accName').textContent = name;
+    const heroName = $('#screen-home .name b');
+    if (heroName) heroName.textContent = name;
+    renderMyProfile();
+    closeEditForm();
+    toast('تم حفظ بروفيلك');
+  }
+  function resetEditForm() {
+    resetProfileOverride('kaito');
+    // the creator name follows back to the default too
+    try {
+      const raw = localStorage.getItem('suli-character');
+      const st = raw ? JSON.parse(raw) : {};
+      st.name = PROFILES.kaito.name;
+      localStorage.setItem('suli-character', JSON.stringify(st));
+    } catch (e) {}
+    $('#accName').textContent = PROFILES.kaito.name;
+    const heroName = $('#screen-home .name b');
+    if (heroName) heroName.textContent = PROFILES.kaito.name;
+    renderMyProfile();
+    openEditForm(); // re-fill the form with the defaults
+    toast('تمت استعادة البروفيل الافتراضي');
+  }
+
   function wire() {
     $('#profileClose').addEventListener('click', () => { if (!sheetJustOpened()) closeSheet(); });
     $('#profileScrim').addEventListener('click', () => { if (!sheetJustOpened()) closeSheet(); });
@@ -758,7 +919,7 @@ const socialUI = (() => {
       if (unBtn) {
         const key = unBtn.dataset.unfriend;
         saveJSON('suli-friends', friends().filter((k) => k !== key));
-        toast('تمت إزالة ' + PROFILES[key].name + ' من الأصدقاء');
+        toast('تمت إزالة ' + getProfile(key).name + ' من الأصدقاء');
         renderFriends();
         if (currentKey === key) renderProfile(key);
         return;
@@ -766,10 +927,19 @@ const socialUI = (() => {
       const row = e.target.closest('[data-friend]');
       if (row) openProfile(row.dataset.friend);
     });
+    // v1.3: my-profile edit form (account screen, kaito only)
+    $('#editMyProfileBtn').addEventListener('click', openEditForm);
+    $('#editClose').addEventListener('click', closeEditForm);
+    $('#editScrim').addEventListener('click', closeEditForm);
+    $('#editSave').addEventListener('click', saveEditForm);
+    $('#editReset').addEventListener('click', resetEditForm);
+    $('#editName').addEventListener('input', updateEditCounters);
+    $('#editBio').addEventListener('input', updateEditCounters);
     renderFriends();
+    renderMyProfile();
   }
 
-  return { wire, openProfile, closeSheet, closeChat, renderFriends };
+  return { wire, openProfile, closeSheet, closeChat, renderFriends, renderMyProfile };
 })();
 
 // ================= SCREEN MANAGER =================
@@ -784,7 +954,7 @@ const screens = {
 let current = 'home';
 
 window.__suli = {
-  version: '1.2.0',
+  version: '1.3.0',
   screen: 'home',
   ready: {},
   playerPos: (name) => {
@@ -793,6 +963,7 @@ window.__suli = {
   },
   npcScreen: (key) => villageScreen.npcScreen(key),
   groundScreen: (x, z) => villageScreen.groundScreen(x, z),
+  creatorMaterials: () => creatorScreen.debugMaterials(),
 };
 
 async function show(name) {
@@ -808,7 +979,7 @@ async function show(name) {
   $$('.screen').forEach((s) => s.classList.toggle('on', s.id === 'screen-' + name));
   $$('#bottomNav .it').forEach((b) => b.classList.toggle('on', b.dataset.screen === name));
   $('#topBack').style.display = name === 'creator' ? 'flex' : 'none';
-  if (name === 'account') socialUI.renderFriends();
+  if (name === 'account') { socialUI.renderFriends(); socialUI.renderMyProfile(); }
   const sc = screens[name];
   if (sc) {
     try { await sc.init(); } catch (e) { /* load overlay shows the error + retry */ }

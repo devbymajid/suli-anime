@@ -1,12 +1,14 @@
-// Suli Anime v1.2 — shared Three.js environment builders (ES module).
+// Suli Anime v1.3 — shared Three.js environment builders (ES module).
 // Adapted from the D1 v5 design scenes (game-3d-design-d1-v5/scenes-v5.js):
 // same village / home / creator environments, but the builders now fill a
 // caller-owned THREE.Scene and return handles, so the game can run a live
 // render loop, move the player and follow with a camera. No single-frame
 // renders here.
+// v1.3: village NPCs are built with their saved appearance (colors).
 import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
 import { buildCharacter, fitHeight } from './characters-v4.js';
+import { getAppearance } from './appearance.js';
 
 // D1 palette («القرية اليابانية») — shared by every screen.
 const P = {
@@ -180,7 +182,7 @@ function buildVillageEnv(scene) {
   const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
   const handles = [];
   for (const p of npcs) {
-    const a = buildCharacter(p.key);
+    const a = buildCharacter(p.key, getAppearance(p.key)); // v1.3: saved colors
     fitHeight(a, 1.37, 0);
     a.position.x = p.x; a.position.z = p.z; a.rotation.y = p.ry;
     a.userData.npcKey = p.key;
