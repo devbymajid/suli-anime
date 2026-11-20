@@ -1,4 +1,4 @@
-// Suli Anime v1 — shared Three.js environment builders (ES module).
+// Suli Anime v1.2 — shared Three.js environment builders (ES module).
 // Adapted from the D1 v5 design scenes (game-3d-design-d1-v5/scenes-v5.js):
 // same village / home / creator environments, but the builders now fill a
 // caller-owned THREE.Scene and return handles, so the game can run a live
@@ -84,6 +84,9 @@ function nameSprite(text, sub, s) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
   sp.scale.set(1.7 * s, (sub ? 0.57 : 0.42) * s, 1);
   sp.renderOrder = 10;
+  // v1.2: name labels must never intercept taps — NPC picking raycasts the
+  // character groups, and a sprite in the way would steal the tap.
+  sp.raycast = () => {};
   return sp;
 }
 
@@ -169,16 +172,29 @@ function buildVillageEnv(scene) {
     { x: 1.9, z: -0.4, ry: -0.6, name: 'يوسف', sub: 'المستوى 8', key: 'yusuf' },
     { x: -1.4, z: -3.2, ry: 2.2, name: 'ليان', sub: 'المستوى 15', key: 'layan' },
   ];
+  // v1.2: keep the NPC groups so taps can pick them (returns { npcs }).
+  // Each group gets an invisible hit cylinder — the characters are small on
+  // a phone screen, and a fingertip needs a forgiving target. The cylinder
+  // is part of the group, so the same recursive raycast hits meshes and
+  // cylinder alike; it renders nothing (opacity 0, no depth write).
+  const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+  const handles = [];
   for (const p of npcs) {
     const a = buildCharacter(p.key);
     fitHeight(a, 1.37, 0);
     a.position.x = p.x; a.position.z = p.z; a.rotation.y = p.ry;
+    a.userData.npcKey = p.key;
+    const hit = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 1.9, 10), hitMat);
+    hit.position.y = 0.95;
+    a.add(hit);
     scene.add(a);
     scene.add(shadowDisc(p.x, p.z, 0.42));
     const sp = nameSprite(p.name, p.sub, 0.45);
     sp.position.set(p.x, 2.15, p.z);
     scene.add(sp);
+    handles.push({ key: p.key, group: a });
   }
+  return { npcs: handles };
 }
 
 // ================= HOME environment (no player avatar) =================

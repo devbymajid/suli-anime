@@ -1,12 +1,15 @@
-// Suli Anime v1 — SPA controller.
+// Suli Anime v1.2 — SPA controller.
 // One render loop runs at a time: switching screens stops the previous
 // screen's loop and starts the new one. 3D screens init lazily on first
 // visit (each loads the kaito VRM once; the browser cache makes later
 // loads fast). No network use beyond the local files.
+// v1.2 adds the village social feature: tap an NPC to open their profile
+// (like / add friend / scripted chat), all stored in localStorage.
 import * as THREE from 'three';
 import { loadVRM, poseVRM, fitVRM, baseRenderer, shadowDisc, nameSprite, buildCreatorEnv, buildVillageEnv, buildHomeEnv } from './env.js';
 import { Player, FollowCamera, FixedCamera, createInput } from './player.js';
 import { buildCharacter, fitHeight } from './characters-v4.js';
+import { PROFILES } from './profiles.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -107,6 +110,25 @@ const homeScreen = (() => {
 function makeWalkScreen(opts) {
   let ready = false, initPromise = null, hintHidden = false;
   let renderer, scene, camera, player, camFollow, input, disc, loop = makeLoop();
+  let npcs = null; // v1.2: village NPC groups for tap-to-profile (room: none)
+  const npcRay = new THREE.Raycaster();
+  // v1.2: raycast the NPC groups for a tap (normalized device coords).
+  // On a hit, open that character's profile and return true so the tap does
+  // NOT also move the player. Walks up from the hit mesh to the group
+  // carrying userData.npcKey (the hit may be a body mesh or the invisible
+  // hit cylinder). Defined here so it can use this screen's camera.
+  function pickNPC(nx, ny) {
+    if (!npcs || !npcs.length) return false;
+    npcRay.setFromCamera({ x: nx, y: ny }, camera);
+    const hits = npcRay.intersectObjects(npcs.map((n) => n.group), true);
+    if (!hits.length) return false;
+    let o = hits[0].object;
+    while (o && !o.userData.npcKey) o = o.parent;
+    if (!o) return false;
+    player.cancelTarget();
+    socialUI.openProfile(o.userData.npcKey);
+    return true;
+  }
   async function init() {
     if (ready) return;
     if (initPromise) return initPromise;
@@ -115,7 +137,8 @@ function makeWalkScreen(opts) {
       const w = vp.clientWidth, h = vp.clientHeight;
       renderer = baseRenderer(vp, w, h, false);
       scene = new THREE.Scene();
-      opts.env(scene);
+      const envHandles = opts.env(scene) || {}; // village returns { npcs }
+      if (envHandles.npcs) npcs = envHandles.npcs;
       camera = new THREE.PerspectiveCamera(opts.fov || 46, w / h, 0.1, 80);
       let av;
       try {
@@ -140,7 +163,9 @@ function makeWalkScreen(opts) {
         camFollow = new FollowCamera(camera, opts.camDist, opts.camHeight);
       }
       camFollow.snapTo(player);
-      input = createInput($(opts.joy), $(opts.knob), renderer.domElement, camera, (pt) => player.setTarget(pt.x, pt.z));
+      input = createInput($(opts.joy), $(opts.knob), renderer.domElement, camera,
+        (pt) => player.setTarget(pt.x, pt.z),
+        npcs ? (nx, ny) => pickNPC(nx, ny) : undefined); // v1.2: NPC taps first
       $(opts.load).classList.add('hidden');
       ready = true;
       window.__suli.ready[opts.name] = true;
@@ -178,6 +203,35 @@ function makeWalkScreen(opts) {
     },
     playerPos() { return ready ? { x: player.position.x, z: player.position.z } : null; },
     isReady() { return ready; },
+    // v1.2 test hooks (same family as playerPos): project a world point to
+    // page pixels, for automated tap tests. visible is false when the point
+    // is outside the current camera view.
+    groundScreen(x, z) {
+      if (!ready) return null;
+      const v = new THREE.Vector3(x, 0, z);
+      v.project(camera);
+      const r = renderer.domElement.getBoundingClientRect();
+      return {
+        x: r.left + (v.x + 1) / 2 * r.width,
+        y: r.top + (1 - v.y) / 2 * r.height,
+        visible: v.z < 1 && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1,
+      };
+    },
+    npcScreen(key) {
+      if (!ready || !npcs) return null;
+      const n = npcs.find((o) => o.key === key);
+      if (!n) return null;
+      const v = new THREE.Vector3();
+      n.group.getWorldPosition(v);
+      v.y = 1.0;
+      v.project(camera);
+      const r = renderer.domElement.getBoundingClientRect();
+      return {
+        x: r.left + (v.x + 1) / 2 * r.width,
+        y: r.top + (1 - v.y) / 2 * r.height,
+        visible: v.z < 1 && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1,
+      };
+    },
   };
   return api;
 }
@@ -456,6 +510,268 @@ const creatorScreen = (() => {
   };
 })();
 
+// ================= SOCIAL: profiles, likes, friends, chat (v1.2) =================
+// All local (localStorage) — no backend, no multiplayer yet. Chats are
+// scripted replies from the village characters, NOT real players: nothing
+// here pretends anyone is online or connected.
+const socialUI = (() => {
+  let currentKey = null; // profile open in the sheet
+  let chatKey = null;    // character open in the chat overlay
+  let replyTimer = null;
+  let preview = null;    // { renderer, scene, camera, model, raf, spin }
+  let sheetOpenedAt = 0; // see the scrim guard in wire(): touch taps fire a
+  // synthetic mouse click right after the tap, and it lands on the scrim
+  // that JUST appeared under the finger — without a guard it closes the
+  // sheet the tap just opened.
+
+  // ---- storage (tolerant: private mode / quota errors just don't persist) ----
+  function loadJSON(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch (e) { return fallback; }
+  }
+  function saveJSON(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+  }
+  const likes = () => loadJSON('suli-likes', {});     // { key: true }
+  const friends = () => loadJSON('suli-friends', []); // [key]
+  const chats = () => loadJSON('suli-chats', {});     // { key: [{from, text}] }
+  const likeCount = (key) => PROFILES[key].baseLikes + (likes()[key] ? 1 : 0);
+  const isFriend = (key) => friends().indexOf(key) !== -1;
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // ---- profile sheet ----
+  function renderProfile(key) {
+    const p = PROFILES[key];
+    $('#profileName').textContent = p.name;
+    $('#profileLevel').textContent = 'المستوى ' + p.level;
+    $('#profileLikes').textContent = likeCount(key);
+    $('#profileLikesIcon').textContent = likes()[key] ? '♥' : '♡';
+    $('#profileBio').textContent = p.bio;
+    $('#profileTraits').innerHTML = p.traits.map((t) => '<span class="chip warm">' + escapeHtml(t) + '</span>').join('');
+    $('#profileInterests').innerHTML = p.interests.map((t) => '<span class="chip">' + escapeHtml(t) + '</span>').join('');
+    const likeBtn = $('#profileLike');
+    likeBtn.classList.toggle('on', !!likes()[key]);
+    likeBtn.querySelector('span').textContent = likes()[key] ? 'أعجبك' : 'إعجاب';
+    const frBtn = $('#profileFriend');
+    frBtn.classList.toggle('on', isFriend(key));
+    frBtn.querySelector('span').textContent = isFriend(key) ? 'صديق ✓' : 'إضافة صديق';
+  }
+
+  // Small live 3D preview: same small-renderer pattern as the creator
+  // thumbs, full body, slowly spinning while the sheet is open. One
+  // renderer is created on first open and reused; the spin loop runs only
+  // while the sheet is shown. (The sheet is translated off-screen when
+  // closed, not display:none, so its box keeps its size and the renderer
+  // can be built before the first open animation.)
+  function buildPreview(key) {
+    const el = $('#profilePreview');
+    if (!preview) {
+      const w = el.clientWidth, h = el.clientHeight;
+      if (w < 10 || h < 10) return;
+      preview = {
+        renderer: baseRenderer(el, w, h, true),
+        scene: new THREE.Scene(),
+        camera: new THREE.PerspectiveCamera(36, w / h, 0.1, 60),
+        model: null, raf: 0, spin: 0,
+      };
+      preview.scene.add(new THREE.HemisphereLight(0xffffff, 0xf3e7cf, 0.85));
+      const dl = new THREE.DirectionalLight(0xfff2dd, 1.15);
+      dl.position.set(4, 7, 4); preview.scene.add(dl);
+      preview.camera.position.set(0.15, 0.95, 2.4);
+      preview.camera.lookAt(0, 0.75, 0);
+    }
+    if (preview.model) { preview.scene.remove(preview.model); preview.model = null; }
+    const av = buildCharacter(key);
+    fitHeight(av, 1.5, 0);
+    av.rotation.y = -0.25;
+    preview.model = av;
+    preview.scene.add(av);
+    preview.spin = 0;
+    if (!preview.raf) {
+      const tick = () => {
+        preview.raf = requestAnimationFrame(tick);
+        if (preview.model) { preview.spin += 0.008; preview.model.rotation.y = -0.25 + preview.spin; }
+        preview.renderer.render(preview.scene, preview.camera);
+      };
+      tick();
+    }
+  }
+
+  function openProfile(key) {
+    if (!PROFILES[key]) return;
+    currentKey = key;
+    sheetOpenedAt = Date.now();
+    renderProfile(key);
+    $('#profileScrim').classList.add('show');
+    $('#profileSheet').classList.add('show');
+    buildPreview(key);
+  }
+  // True while the synthetic mouse click from the opening tap may still
+  // arrive (~0-300ms after touchend). A real user cannot meaningfully tap
+  // the scrim or the X within 400ms of the sheet appearing.
+  function sheetJustOpened() { return Date.now() - sheetOpenedAt < 400; }
+  function closeSheet() {
+    currentKey = null;
+    $('#profileScrim').classList.remove('show');
+    $('#profileSheet').classList.remove('show');
+    if (preview && preview.raf) { cancelAnimationFrame(preview.raf); preview.raf = 0; }
+  }
+
+  function toggleLike() {
+    if (!currentKey) return;
+    const all = likes();
+    if (all[currentKey]) delete all[currentKey]; else all[currentKey] = true;
+    saveJSON('suli-likes', all);
+    renderProfile(currentKey);
+  }
+  function toggleFriend() {
+    if (!currentKey) return;
+    let f = friends();
+    if (isFriend(currentKey)) {
+      f = f.filter((k) => k !== currentKey);
+      toast('تمت إزالة ' + PROFILES[currentKey].name + ' من الأصدقاء');
+    } else {
+      f.push(currentKey);
+      toast('تمت إضافة ' + PROFILES[currentKey].name + ' كصديق');
+    }
+    saveJSON('suli-friends', f);
+    renderProfile(currentKey);
+    renderFriends();
+  }
+
+  // ---- friends list (account screen) ----
+  function renderFriends() {
+    const list = $('#friendsList');
+    const f = friends();
+    $('#accFriendsCount').textContent = f.length;
+    if (!f.length) {
+      list.innerHTML = '<div class="fempty">لا أصدقاء بعد — المس شخصية في القرية لإضافتها كصديق</div>';
+      return;
+    }
+    list.innerHTML = f.map((key) => {
+      const p = PROFILES[key];
+      if (!p) return '';
+      return '<div class="frow" data-friend="' + key + '">'
+        + '<span class="frow-av" style="background:' + p.color + '">' + p.name.charAt(0) + '</span>'
+        + '<div class="frow-id"><b>' + p.name + '</b><span>المستوى ' + p.level + '</span></div>'
+        + '<button class="frow-btn" data-chat="' + key + '">مراسلة</button>'
+        + '<button class="frow-btn danger" data-unfriend="' + key + '">إزالة</button>'
+        + '</div>';
+    }).join('');
+  }
+
+  // ---- chat ----
+  // Reply choice: a keyword match wins; otherwise rotate through the
+  // character's lines in order, with a generic fallback after each full
+  // cycle (themCount counts the 'them' messages already in the thread, so
+  // the rotation survives reloads).
+  function pickReply(key, text) {
+    const p = PROFILES[key];
+    const t = String(text);
+    for (const r of p.replies) {
+      if (r.keys && r.keys.some((k) => t.indexOf(k) !== -1)) return r.text;
+    }
+    const thread = chats()[key] || [];
+    const themCount = thread.filter((m) => m.from === 'them').length;
+    const cycle = p.replies.length + 1;
+    if (themCount % cycle === p.replies.length) {
+      const fIdx = Math.floor(themCount / cycle) % p.fallbacks.length;
+      return p.fallbacks[fIdx];
+    }
+    return p.replies[themCount % cycle].text;
+  }
+
+  function renderChatList() {
+    const list = $('#chatList');
+    const thread = (chats()[chatKey] || []);
+    list.innerHTML = thread.map((m) =>
+      '<div class="msg ' + (m.from === 'me' ? 'me' : 'them') + '">' + escapeHtml(m.text) + '</div>'
+    ).join('');
+    list.scrollTop = list.scrollHeight;
+  }
+  function openChat(key) {
+    if (!PROFILES[key]) return;
+    chatKey = key;
+    const p = PROFILES[key];
+    $('#chatName').textContent = p.name;
+    const av = $('#chatAvatar');
+    av.textContent = p.name.charAt(0);
+    av.style.background = p.color;
+    $('#chatInput').value = '';
+    renderChatList();
+    closeSheet();
+    $('#chatOverlay').classList.add('show');
+  }
+  function closeChat() {
+    $('#chatOverlay').classList.remove('show');
+    chatKey = null;
+    if (replyTimer) { clearTimeout(replyTimer); replyTimer = null; }
+  }
+  function sendMessage() {
+    const input = $('#chatInput');
+    const text = input.value.trim();
+    if (!text || !chatKey) return;
+    const key = chatKey;
+    const all = chats();
+    if (!all[key]) all[key] = [];
+    all[key].push({ from: 'me', text });
+    saveJSON('suli-chats', all);
+    input.value = '';
+    renderChatList();
+    // typing indicator, then the scripted reply ~1s later
+    const list = $('#chatList');
+    const typing = document.createElement('div');
+    typing.className = 'msg them typing';
+    typing.innerHTML = '<i></i><i></i><i></i>';
+    list.appendChild(typing);
+    list.scrollTop = list.scrollHeight;
+    const reply = pickReply(key, text);
+    if (replyTimer) clearTimeout(replyTimer);
+    replyTimer = setTimeout(() => {
+      replyTimer = null;
+      const all2 = chats();
+      if (!all2[key]) all2[key] = [];
+      all2[key].push({ from: 'them', text: reply });
+      saveJSON('suli-chats', all2);
+      // only re-render if the user is still in THIS chat
+      if (chatKey === key) { typing.remove(); renderChatList(); }
+    }, 1000);
+  }
+
+  function wire() {
+    $('#profileClose').addEventListener('click', () => { if (!sheetJustOpened()) closeSheet(); });
+    $('#profileScrim').addEventListener('click', () => { if (!sheetJustOpened()) closeSheet(); });
+    $('#profileLike').addEventListener('click', toggleLike);
+    $('#profileFriend').addEventListener('click', toggleFriend);
+    $('#profileMessage').addEventListener('click', () => { if (currentKey) openChat(currentKey); });
+    $('#chatBack').addEventListener('click', closeChat);
+    $('#chatSend').addEventListener('click', sendMessage);
+    $('#chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
+    $('#friendsList').addEventListener('click', (e) => {
+      const chatBtn = e.target.closest('[data-chat]');
+      if (chatBtn) { openChat(chatBtn.dataset.chat); return; }
+      const unBtn = e.target.closest('[data-unfriend]');
+      if (unBtn) {
+        const key = unBtn.dataset.unfriend;
+        saveJSON('suli-friends', friends().filter((k) => k !== key));
+        toast('تمت إزالة ' + PROFILES[key].name + ' من الأصدقاء');
+        renderFriends();
+        if (currentKey === key) renderProfile(key);
+        return;
+      }
+      const row = e.target.closest('[data-friend]');
+      if (row) openProfile(row.dataset.friend);
+    });
+    renderFriends();
+  }
+
+  return { wire, openProfile, closeSheet, closeChat, renderFriends };
+})();
+
 // ================= SCREEN MANAGER =================
 const screens = {
   home: homeScreen,
@@ -468,17 +784,23 @@ const screens = {
 let current = 'home';
 
 window.__suli = {
-  version: '1.1.0',
+  version: '1.2.0',
   screen: 'home',
   ready: {},
   playerPos: (name) => {
     const s = screens[name];
     return s && s.playerPos ? s.playerPos() : null;
   },
+  npcScreen: (key) => villageScreen.npcScreen(key),
+  groundScreen: (x, z) => villageScreen.groundScreen(x, z),
 };
 
 async function show(name) {
   if (current === name) return;
+  // v1.2: leaving a screen closes any open sheet/chat (their scrim/overlay
+  // would otherwise cover the new screen)
+  socialUI.closeSheet();
+  socialUI.closeChat();
   const prev = screens[current];
   if (prev) prev.stop();
   current = name;
@@ -486,6 +808,7 @@ async function show(name) {
   $$('.screen').forEach((s) => s.classList.toggle('on', s.id === 'screen-' + name));
   $$('#bottomNav .it').forEach((b) => b.classList.toggle('on', b.dataset.screen === name));
   $('#topBack').style.display = name === 'creator' ? 'flex' : 'none';
+  if (name === 'account') socialUI.renderFriends();
   const sc = screens[name];
   if (sc) {
     try { await sc.init(); } catch (e) { /* load overlay shows the error + retry */ }
@@ -506,4 +829,5 @@ window.addEventListener('resize', () => {
 
 // boot: home screen first
 creatorScreen.wireUI();
+socialUI.wire();
 homeScreen.init().then(() => homeScreen.start()).catch(() => {});

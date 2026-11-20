@@ -1,7 +1,10 @@
-// Suli Anime v1.1 — playable VRM character: procedural walk + follow camera.
+// Suli Anime v1.2 — playable VRM character: procedural walk + follow camera.
 // The VRM model ships with NO animation clips, so walking is procedural:
 // legs/arms swing by rotating their bones, hips bob, and everything eases
 // back to the standing pose when the player stops.
+// v1.2: tap routing only — createInput calls onNPCTap first so a tap on an
+// NPC opens their profile instead of moving the player. The Player walk
+// code is unchanged from v1.1.
 //
 // v1.1 rebuilds the walk cycle from gait biomechanics (see _pose):
 // correct knee timing (flex in swing, straight at heel-strike), ankle/toe
@@ -309,7 +312,10 @@ class FollowCamera {
 // joystickEl: the round base element; knobEl: the moving knob inside it.
 // canvasEl: the 3D canvas — taps on it (not on the joystick) set a move target.
 // onTap(point): called with the ground-plane {x, z} of a canvas tap.
-function createInput(joystickEl, knobEl, canvasEl, camera, onTap) {
+// onNPCTap(nx, ny) [v1.2, optional]: called first with the tap's normalized
+// device coords (-1..1); returns true when the tap hit an NPC and was
+// handled (profile opened) — then tap-to-move is skipped for that tap.
+function createInput(joystickEl, knobEl, canvasEl, camera, onTap, onNPCTap) {
   const keys = {};
   const joy = { x: 0, y: 0, active: false, id: null };
   const RAY = new THREE.Raycaster();
@@ -373,17 +379,34 @@ function createInput(joystickEl, knobEl, canvasEl, camera, onTap) {
 
   // tap-to-move on the canvas: raycast the tap onto the ground plane
   let downAt = 0, downX = 0, downY = 0;
-  canvasEl.addEventListener('pointerdown', (e) => { downAt = Date.now(); downX = e.clientX; downY = e.clientY; });
+  // v1.2: after a touch tap, the browser fires a synthetic mouse click at
+  // the same point — and by then the profile scrim covers that point, so
+  // the synthetic click would close the sheet the tap just opened. When a
+  // tap opens an NPC profile we cancel the touchend, which suppresses the
+  // whole synthetic mouse sequence. (The sheet also has a 400ms guard as a
+  // fallback for browsers that order the events differently.)
+  let suppressNextTouchEnd = false;
+  canvasEl.addEventListener('pointerdown', (e) => { downAt = Date.now(); downX = e.clientX; downY = e.clientY; suppressNextTouchEnd = false; });
   canvasEl.addEventListener('pointerup', (e) => {
     if (Date.now() - downAt > 350) return; // it was a drag, not a tap
     if (Math.hypot(e.clientX - downX, e.clientY - downY) > 12) return;
     const r = canvasEl.getBoundingClientRect();
     const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
     const ny = -((e.clientY - r.top) / r.height) * 2 + 1;
+    // v1.2: NPCs first — a tap on a character opens their profile and the
+    // player does NOT walk; only taps that miss every NPC move the player.
+    if (onNPCTap && onNPCTap(nx, ny)) { suppressNextTouchEnd = true; return; }
     RAY.setFromCamera({ x: nx, y: ny }, camera);
     const hit = new THREE.Vector3();
     if (RAY.ray.intersectPlane(PLANE, hit)) onTap({ x: hit.x, z: hit.z });
   });
+  // v1.2: cancel the touchend after an NPC tap so the browser does NOT
+  // synthesize a mouse click onto the scrim that just appeared. Non-passive
+  // on purpose — preventDefault needs it. (pointerup fires before touchend,
+  // so the flag above is already set when this runs.)
+  canvasEl.addEventListener('touchend', (e) => {
+    if (suppressNextTouchEnd) { suppressNextTouchEnd = false; e.preventDefault(); }
+  }, { passive: false });
 
   // combined move vector in SCREEN space: {x: right+, y: down+}, magnitude 0..1
   function screenVec() {
