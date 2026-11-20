@@ -139,9 +139,12 @@
             </div>
             <div style="display:flex;align-items:center;gap:11px;margin-top:12px">
               <span style="font-size:13px;font-weight:800">اللون</span>
-              <span data-group="haircolor" style="display:flex;gap:11px">
+              <span data-group="haircolor" style="display:flex;gap:11px;flex-wrap:wrap">
                 <span class="dot" data-v="#1f2937" style="background:#1f2937"></span>
                 <span class="dot on" data-v="#4a2c2a" style="background:#4a2c2a"></span>
+                <span class="dot" data-v="#6b4226" style="background:#6b4226"></span>
+                <span class="dot" data-v="#c0392b" style="background:#c0392b"></span>
+                <span class="dot" data-v="#4a3542" style="background:#4a3542"></span>
                 <span class="dot" data-v="#e8a33d" style="background:#e8a33d"></span>
                 <span class="dot" data-v="#b91c1c" style="background:#b91c1c"></span>
                 <span class="dot" data-v="#22d3ee" style="background:#22d3ee"></span>
@@ -160,11 +163,13 @@
           </div>
           <div class="panel" data-panel="eyes">
             <div class="lbl">لون العينين</div>
-            <div style="display:flex;gap:11px" data-group="eyecolor">
+            <div style="display:flex;gap:11px;flex-wrap:wrap" data-group="eyecolor">
               <span class="dot on" data-v="#4a2c2a" style="background:#4a2c2a"></span>
               <span class="dot" data-v="#2f7fc4" style="background:#2f7fc4"></span>
+              <span class="dot" data-v="#2f9fd8" style="background:#2f9fd8"></span>
               <span class="dot" data-v="#5e9a6a" style="background:#5e9a6a"></span>
               <span class="dot" data-v="#8b5cf6" style="background:#8b5cf6"></span>
+              <span class="dot" data-v="#7c4a2d" style="background:#7c4a2d"></span>
               <span class="dot" data-v="#b91c1c" style="background:#b91c1c"></span>
               <span class="dot" data-v="#e8a33d" style="background:#e8a33d"></span>
             </div>
@@ -192,6 +197,18 @@
               <div class="opt" data-v="tee"><div class="sw" style="background:#1e1e26"></div><b>قميص أسود</b></div>
               <div class="opt" data-v="hoodie-black"><div class="sw" style="background:#2b2f3a"></div><b>هودي أسود</b></div>
             </div>
+            <div style="display:flex;align-items:center;gap:11px;margin-top:12px">
+              <span style="font-size:13px;font-weight:800">لون الزي</span>
+              <span data-group="outfitcolor" style="display:flex;gap:11px;flex-wrap:wrap">
+                <span class="dot on" data-v="#f5f5f5" style="background:#f5f5f5"></span>
+                <span class="dot" data-v="#1e1e26" style="background:#1e1e26"></span>
+                <span class="dot" data-v="#2b2f3a" style="background:#2b2f3a"></span>
+                <span class="dot" data-v="#b91c1c" style="background:#b91c1c"></span>
+                <span class="dot" data-v="#2f7fc4" style="background:#2f7fc4"></span>
+                <span class="dot" data-v="#5e9a6a" style="background:#5e9a6a"></span>
+                <span class="dot" data-v="#f472b6" style="background:#f472b6"></span>
+              </span>
+            </div>
           </div>
           <div class="panel" data-panel="skin">
             <div class="lbl">لون البشرة</div>
@@ -218,7 +235,7 @@
             <span class="switch on" id="athleticSwitch"><i></i></span>
           </div>
         </div>
-        <p class="mut" style="font-size:12px;line-height:1.8;padding:0 16px;margin:12px 0 0">خيارات الشعر والملابس تُحفظ الآن وستظهر على شخصيتك في التحديث القادم — الطول والجسم الرياضي يظهران في المعاينة فوراً</p>
+        <p class="mut" style="font-size:12px;line-height:1.8;padding:0 16px;margin:12px 0 0">ألوان الشعر والبشرة والزي تظهر فوراً في المعاينة وتُحفظ مع الشخصية؛ لون العينين يظهر على يوسف وسارة وليان، أما عينا كايتو فثابتتان. تسريحة الشعر وشكل الوجه وشكل العينين ونوع الزي تُحفظ كاختيارات ولا تغيّر الشكل حالياً</p>
         <div style="padding:12px 16px 16px"><button class="btn" id="saveCharBtn">حفظ الشخصية</button></div>
       </div>
     </section>
@@ -242,6 +259,19 @@
             <div class="stat"><span>المستوى</span><b>5</b></div>
             <div class="stat"><span>العملات</span><b>1,250</b></div>
             <div class="stat"><span>الأصدقاء</span><b id="accFriendsCount">0</b></div>
+          </div>
+        </div>
+        <div style="padding:14px 16px 0">
+          <div class="hd" style="padding:0 0 8px">بروفيلك</div>
+          <div class="card" style="padding:14px 16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+              <b id="myProfileName" style="font-size:17px">كايتو</b>
+              <span class="prof-level" id="myProfileLevel">المستوى 5</span>
+            </div>
+            <p class="prof-bio" id="myProfileBio" style="margin-top:8px"></p>
+            <div class="prof-sec"><span class="prof-sec-t">الشخصية</span><div class="chips" id="myProfileTraits"></div></div>
+            <div class="prof-sec"><span class="prof-sec-t">الاهتمامات</span><div class="chips" id="myProfileInterests"></div></div>
+            <button class="btn ghost" id="editMyProfileBtn" style="margin-top:14px">تعديل بروفيلي</button>
           </div>
         </div>
         <div style="padding:14px 16px 0">
@@ -316,6 +346,45 @@
           <span>مراسلة</span>
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- ===== v1.3: my-profile edit sheet (kaito only; NPCs are read-only) ===== -->
+  <div class="scrim" id="editScrim"></div>
+  <div class="sheet" id="editSheet" role="dialog" aria-label="تعديل بروفيلي">
+    <div class="sheet-grip"></div>
+    <button class="sheet-x" id="editClose" aria-label="إغلاق">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <div class="sheet-body">
+      <b style="font-size:18px">تعديل بروفيلي</b>
+      <p class="mut" style="font-size:12px;line-height:1.7;margin-top:4px">المستوى وعدد الإعجابات لا يمكن تعديلهما — الحقول الفارغة تعود إلى قيمتها الافتراضية</p>
+      <div class="field">
+        <label>الاسم <span class="counter" id="editNameCount">0/20</span></label>
+        <input id="editName" type="text" maxlength="20" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>السيرة <span class="counter" id="editBioCount">0/200</span></label>
+        <textarea id="editBio" maxlength="200" rows="3"></textarea>
+      </div>
+      <div class="field">
+        <label>الشخصية (3 صفات)</label>
+        <div class="chip-inputs">
+          <input id="editTrait0" type="text" maxlength="15" autocomplete="off">
+          <input id="editTrait1" type="text" maxlength="15" autocomplete="off">
+          <input id="editTrait2" type="text" maxlength="15" autocomplete="off">
+        </div>
+      </div>
+      <div class="field">
+        <label>الاهتمامات (3)</label>
+        <div class="chip-inputs">
+          <input id="editInterest0" type="text" maxlength="15" autocomplete="off">
+          <input id="editInterest1" type="text" maxlength="15" autocomplete="off">
+          <input id="editInterest2" type="text" maxlength="15" autocomplete="off">
+        </div>
+      </div>
+      <div style="margin-top:18px"><button class="btn" id="editSave">حفظ بروفيلي</button></div>
+      <div style="margin-top:9px"><button class="btn ghost" id="editReset">استعادة الافتراضي</button></div>
     </div>
   </div>
 
