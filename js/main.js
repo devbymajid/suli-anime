@@ -1,4 +1,4 @@
-// Suli Anime v1.3 — SPA controller.
+// Suli Anime v1.4 — SPA controller.
 // One render loop runs at a time: switching screens stops the previous
 // screen's loop and starts the new one. 3D screens init lazily on first
 // visit (each loads the kaito VRM once; the browser cache makes later
@@ -9,6 +9,9 @@
 // change the 3D model live and persist per character; (B) the player edits
 // his own profile (kaito) from the account screen — NPC profiles are
 // read-only. Saved appearance is applied everywhere a character appears.
+// v1.4 adds the detailed village: procedural machiya/shop/minka buildings,
+// torii gate, stone plaza/paths and props (env.js), plus circle colliders
+// resolved in the walk loop so the player cannot walk through buildings.
 import * as THREE from 'three';
 import { loadVRM, poseVRM, fitVRM, baseRenderer, shadowDisc, nameSprite, buildCreatorEnv, buildVillageEnv, buildHomeEnv } from './env.js';
 import { Player, FollowCamera, FixedCamera, createInput } from './player.js';
@@ -117,6 +120,7 @@ function makeWalkScreen(opts) {
   let ready = false, initPromise = null, hintHidden = false;
   let renderer, scene, camera, player, camFollow, input, disc, loop = makeLoop();
   let npcs = null; // v1.2: village NPC groups for tap-to-profile (room: none)
+  let colliders = null, envStats = null; // v1.4: village circle colliders + stats (room: none)
   const npcRay = new THREE.Raycaster();
   // v1.2: raycast the NPC groups for a tap (normalized device coords).
   // On a hit, open that character's profile and return true so the tap does
@@ -143,8 +147,10 @@ function makeWalkScreen(opts) {
       const w = vp.clientWidth, h = vp.clientHeight;
       renderer = baseRenderer(vp, w, h, false);
       scene = new THREE.Scene();
-      const envHandles = opts.env(scene) || {}; // village returns { npcs }
+      const envHandles = opts.env(scene) || {}; // village returns { npcs, colliders, stats }
       if (envHandles.npcs) npcs = envHandles.npcs;
+      if (envHandles.colliders) colliders = envHandles.colliders;
+      if (envHandles.stats) envStats = envHandles.stats;
       camera = new THREE.PerspectiveCamera(opts.fov || 46, w / h, 0.1, 80);
       let av;
       try {
@@ -196,6 +202,20 @@ function makeWalkScreen(opts) {
       loop.start((dt) => {
         const dir = input.worldDir(camFollow);
         player.update(dt, dir);
+        // v1.4: circle colliders (buildings/props) — push the player out to
+        // the edge and cancel tap-to-move so they stop instead of walking
+        // in place against the obstacle. Player walk code untouched.
+        if (colliders) {
+          for (const c of colliders) {
+            const dx = player.position.x - c.x, dz = player.position.z - c.z;
+            const d = Math.hypot(dx, dz);
+            if (d < c.r) {
+              if (d < 1e-4) { player.position.x = c.x + c.r; }
+              else { player.position.x = c.x + dx / d * c.r; player.position.z = c.z + dz / d * c.r; }
+              player.cancelTarget();
+            }
+          }
+        }
         camFollow.update(dt, player);
         disc.position.x = player.position.x;
         disc.position.z = player.position.z;
@@ -212,6 +232,12 @@ function makeWalkScreen(opts) {
     },
     playerPos() { return ready ? { x: player.position.x, z: player.position.z } : null; },
     isReady() { return ready; },
+    // v1.4 test hooks: render stats + village inventory (colliders/stats)
+    perf() {
+      if (!ready) return null;
+      return { triangles: renderer.info.render.triangles, calls: renderer.info.render.calls };
+    },
+    info() { return ready ? { colliders: colliders ? colliders.length : 0, stats: envStats } : null; },
     // v1.2 test hooks (same family as playerPos): project a world point to
     // page pixels, for automated tap tests. visible is false when the point
     // is outside the current camera view.
@@ -954,7 +980,7 @@ const screens = {
 let current = 'home';
 
 window.__suli = {
-  version: '1.3.0',
+  version: '1.4.0',
   screen: 'home',
   ready: {},
   playerPos: (name) => {
@@ -964,6 +990,8 @@ window.__suli = {
   npcScreen: (key) => villageScreen.npcScreen(key),
   groundScreen: (x, z) => villageScreen.groundScreen(x, z),
   creatorMaterials: () => creatorScreen.debugMaterials(),
+  villagePerf: () => villageScreen.perf(),
+  villageInfo: () => villageScreen.info(),
 };
 
 async function show(name) {

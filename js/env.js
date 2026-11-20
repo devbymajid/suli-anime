@@ -1,10 +1,12 @@
-// Suli Anime v1.3 — shared Three.js environment builders (ES module).
+// Suli Anime v1.4 — shared Three.js environment builders (ES module).
 // Adapted from the D1 v5 design scenes (game-3d-design-d1-v5/scenes-v5.js):
 // same village / home / creator environments, but the builders now fill a
 // caller-owned THREE.Scene and return handles, so the game can run a live
 // render loop, move the player and follow with a camera. No single-frame
 // renders here.
 // v1.3: village NPCs are built with their saved appearance (colors).
+// v1.4: detailed village — procedural machiya/shop/minka buildings, torii
+// gate, stone plaza/paths, props; circle colliders returned to the caller.
 import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
 import { buildCharacter, fitHeight } from './characters-v4.js';
@@ -122,6 +124,126 @@ function buildCreatorEnv(scene) {
   pts.forEach(function (p) { scene.add(mesh(new THREE.OctahedronGeometry(0.09), deco, p[0], p[1], p[2])); });
 }
 
+// ---- Procedural canvas textures (v1.4) ----
+// Every texture is drawn on a canvas at load — no external files, no
+// network. Textures are drawn LIGHT so material.color can tint them
+// (a Lambert color multiplies the map).
+function canvasTex(w, h, draw, rx, ry) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.RepeatWrapping;
+  if (rx) t.repeat.set(rx, ry || rx);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+function seededRnd(seed) {
+  let s = seed;
+  return function () { s = (s * 16807) % 2147483647; return s / 2147483647; };
+}
+function rr(x, px, py, w, h, r) { // rounded-rect path
+  x.beginPath();
+  x.moveTo(px + r, py);
+  x.lineTo(px + w - r, py); x.quadraticCurveTo(px + w, py, px + w, py + r);
+  x.lineTo(px + w, py + h - r); x.quadraticCurveTo(px + w, py + h, px + w - r, py + h);
+  x.lineTo(px + r, py + h); x.quadraticCurveTo(px, py + h, px, py + h - r);
+  x.lineTo(px, py + r); x.quadraticCurveTo(px, py, px + r, py);
+  x.closePath();
+}
+function drawCobble(x, w, h) {
+  x.fillStyle = '#7d7466'; x.fillRect(0, 0, w, h); // grout
+  const n = 4, s = w / n, rnd = seededRnd(11);
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    const v = 196 + Math.floor(rnd() * 30);
+    x.fillStyle = 'rgb(' + v + ',' + (v - 10) + ',' + (v - 32) + ')';
+    rr(x, c * s + 3, r * s + 3, s - 6, s - 6, 10); x.fill();
+    x.fillStyle = 'rgba(255,255,255,0.10)';
+    rr(x, c * s + 7, r * s + 7, s - 14, (s - 14) / 2, 8); x.fill();
+  }
+}
+function drawWoodPlanks(x, w, h) {
+  x.fillStyle = '#d9c1a0'; x.fillRect(0, 0, w, h);
+  const rnd = seededRnd(23);
+  for (let i = 0; i < 4; i++) {
+    const px = i * (w / 4);
+    x.fillStyle = 'rgba(120,90,55,0.55)';
+    x.fillRect(px, 0, 2, h);
+    x.fillStyle = 'rgba(120,90,55,0.18)';
+    for (let g = 0; g < 5; g++) {
+      const gx = px + 4 + rnd() * (w / 4 - 8);
+      x.fillRect(gx, rnd() * h * 0.5, 1.5, h * (0.3 + rnd() * 0.5));
+    }
+  }
+}
+function drawRoofTiles(x, w, h) {
+  x.fillStyle = '#cfc9c4'; x.fillRect(0, 0, w, h);
+  const rows = 4, rh = h / rows;
+  for (let r = 0; r < rows; r++) {
+    const y = r * rh;
+    x.fillStyle = 'rgba(90,80,75,0.35)'; x.fillRect(0, y + rh - 3, w, 3);
+    for (let c = 0; c < 8; c++) {
+      const cx = c * (w / 8) + (r % 2 ? w / 16 : 0);
+      x.fillStyle = 'rgba(255,255,255,0.28)';
+      x.beginPath(); x.arc(cx, y + rh - 2, w / 18, Math.PI, 0); x.fill();
+      x.fillStyle = 'rgba(90,80,75,0.25)';
+      x.beginPath(); x.arc(cx, y + rh - 2, w / 18, 0, Math.PI); x.fill();
+    }
+  }
+}
+function drawPlaster(x, w, h) {
+  x.fillStyle = '#f2ead8'; x.fillRect(0, 0, w, h);
+  const rnd = seededRnd(37);
+  for (let i = 0; i < 260; i++) {
+    x.fillStyle = rnd() > 0.5 ? 'rgba(180,160,120,0.10)' : 'rgba(255,255,255,0.12)';
+    x.fillRect(rnd() * w, rnd() * h, 2, 2);
+  }
+}
+function drawLattice(x, w, h) { // shoji paper + dark wood grid (windows)
+  x.fillStyle = '#ffeec2'; x.fillRect(0, 0, w, h);
+  x.fillStyle = '#5a4230';
+  x.fillRect(0, 0, w, 8); x.fillRect(0, h - 8, w, 8);
+  x.fillRect(0, 0, 8, h); x.fillRect(w - 8, 0, 8, h);
+  for (let i = 1; i < 4; i++) {
+    x.fillRect(i * w / 4 - 3, 0, 6, h);
+    x.fillRect(0, i * h / 4 - 3, w, 6);
+  }
+}
+function drawShojiDoor(x, w, h) { // sliding door: paper panels + wood frame
+  x.fillStyle = '#ffedbe'; x.fillRect(0, 0, w, h);
+  x.fillStyle = '#6b4a2f';
+  x.fillRect(0, 0, w, 10); x.fillRect(0, h - 10, w, 10);
+  x.fillRect(0, 0, 10, h); x.fillRect(w - 10, 0, 10, h);
+  x.fillRect(w / 2 - 4, 0, 8, h);
+  for (let i = 1; i < 6; i++) x.fillRect(0, i * h / 6 - 3, w, 6);
+  x.fillStyle = '#7a5230'; x.fillRect(0, h - h / 6, w, h / 6 - 10); // solid kick panel
+}
+function drawAwning(x, w, h) { // pink/white stripes
+  for (let i = 0; i < 8; i++) {
+    x.fillStyle = i % 2 ? '#fdf3e2' : '#e86a8a';
+    x.fillRect(i * w / 8, 0, w / 8, h);
+  }
+  x.fillStyle = 'rgba(0,0,0,0.08)'; x.fillRect(0, h - 10, w, 10);
+}
+function drawEmblem(x, w, h) { // shop sign: wood board + painted sakura blossom (no text)
+  x.fillStyle = '#8b5e3c'; x.fillRect(0, 0, w, h);
+  x.fillStyle = '#6b4526'; x.fillRect(0, 0, w, 8); x.fillRect(0, h - 8, w, 8);
+  x.fillRect(0, 0, 8, h); x.fillRect(w - 8, 0, 8, h);
+  const cx = w / 2, cy = h / 2 - 6, r = 30;
+  x.fillStyle = '#f2a0c0';
+  for (let i = 0; i < 5; i++) {
+    const a = -Math.PI / 2 + i * Math.PI * 2 / 5;
+    x.beginPath();
+    x.ellipse(cx + Math.cos(a) * r * 0.62, cy + Math.sin(a) * r * 0.62, r * 0.55, r * 0.42, a + Math.PI / 2, 0, Math.PI * 2);
+    x.fill();
+  }
+  x.fillStyle = '#ffd166';
+  x.beginPath(); x.arc(cx, cy, 10, 0, Math.PI * 2); x.fill();
+  x.fillStyle = '#f2a0c0';
+  x.beginPath(); x.arc(cx, h - 26, 7, 0, Math.PI * 2); x.fill();
+  x.beginPath(); x.arc(cx - 16, h - 20, 5, 0, Math.PI * 2); x.fill();
+  x.beginPath(); x.arc(cx + 16, h - 20, 5, 0, Math.PI * 2); x.fill();
+}
+
 // ================= VILLAGE environment (no player avatar) =================
 // Walkable plaza is roughly x in [-6.5, 6.5], z in [-6, 6.5]; houses/trees sit
 // outside the path. The 3 code-built characters stand in the plaza as NPCs.
@@ -130,28 +252,260 @@ function buildVillageEnv(scene) {
   scene.fog = new THREE.Fog(P.sky, 16, 34);
   lights(scene, P.sky, P.ground, P.sun, 1.0);
   scene.add(mesh(new THREE.PlaneGeometry(40, 40), mat(P.ground), 0, 0, 0, -Math.PI / 2, 0, 0));
-  scene.add(mesh(new THREE.PlaneGeometry(2.4, 16), mat(P.path), 0, 0.03, 1.5, -Math.PI / 2, 0, 0));
-  function house(x, z, ry, s) {
+  // v1.4: cobbled main path + central stone plaza (flat ground detail, no colliders)
+  const cobblePath = canvasTex(256, 256, drawCobble, 1, 8);
+  scene.add(mesh(new THREE.PlaneGeometry(2.4, 16),
+    new THREE.MeshLambertMaterial({ map: cobblePath, color: 0xd9c9a3 }), 0, 0.03, 1.5, -Math.PI / 2, 0, 0));
+  const cobblePlaza = canvasTex(256, 256, drawCobble, 2, 2);
+  scene.add(mesh(new THREE.CircleGeometry(2.4, 36),
+    new THREE.MeshLambertMaterial({ map: cobblePlaza, color: 0xe8d9b8 }), 0, 0.02, 1.0, -Math.PI / 2, 0, 0));
+
+  // ---- v1.4 shared materials (one instance each, reused by every building) ----
+  const woodTex = canvasTex(128, 128, drawWoodPlanks);
+  const roofTex = canvasTex(128, 128, drawRoofTiles);
+  const plasterTex = canvasTex(128, 128, drawPlaster);
+  const latticeTex = canvasTex(128, 128, drawLattice);
+  const shojiTex = canvasTex(128, 256, drawShojiDoor);
+  const awningTex = canvasTex(128, 128, drawAwning);
+  const emblemTex = canvasTex(128, 128, drawEmblem);
+  const stoneMat = mat(0x9a938a);
+  const woodDark = mat(0x6b4a2f);
+  const woodMid = mat(0x8b5e3c);
+  const latticeMat = new THREE.MeshLambertMaterial({ map: latticeTex, emissive: 0xffdf9e, emissiveIntensity: 0.45, emissiveMap: latticeTex });
+  const shojiMat = new THREE.MeshLambertMaterial({ map: shojiTex });
+  const awningMat = new THREE.MeshLambertMaterial({ map: awningTex, side: THREE.DoubleSide });
+  const emblemMat = new THREE.MeshLambertMaterial({ map: emblemTex });
+  const lampMat = mat(0xffe9a8, { emissive: 0xffb84d, emissiveIntensity: 0.7 });
+  const vermilion = mat(0xc8432b);
+  const darkTrim = mat(0x3a2c22);
+  const plasterMat = (c) => new THREE.MeshLambertMaterial({ map: plasterTex, color: c });
+  const woodMat = (c) => new THREE.MeshLambertMaterial({ map: woodTex, color: c });
+  const roofMat = (c) => new THREE.MeshLambertMaterial({ map: roofTex, color: c });
+  const norenMat = (c) => mat(c);
+  // v1.4: circle colliders {x, z, r} — the player is pushed out of these in
+  // main.js, so nobody walks through a building or a prop. Returned to the caller.
+  const colliders = [];
+  function addCollider(x, z, r) { colliders.push({ x: x, z: z, r: r }); }
+
+  // Gabled roof: two slanted tile planes + ridge cap + gable-end triangles.
+  // w/d = building width/depth, wallTop = y where the walls end, rise = ridge height.
+  function gableRoof(g, w, d, wallTop, rise, roofM, gableM) {
+    const a = d / 2 + 0.35; // half-depth + eave overhang
+    const L = Math.sqrt(a * a + rise * rise);
+    const ang = Math.atan2(rise, a);
+    const pw = w + 0.7; // width + side overhang
+    // front slope (+Z): rotation.x = +ang tilts the +Z edge down
+    g.add(mesh(new THREE.BoxGeometry(pw, 0.09, L), roofM, 0, wallTop + rise / 2, a / 2, ang, 0, 0));
+    g.add(mesh(new THREE.BoxGeometry(pw, 0.09, L), roofM, 0, wallTop + rise / 2, -a / 2, -ang, 0, 0));
+    g.add(mesh(new THREE.BoxGeometry(pw + 0.1, 0.12, 0.24), darkTrim, 0, wallTop + rise + 0.03, 0));
+    const tri = new THREE.Shape();
+    tri.moveTo(-d / 2 - 0.1, 0); tri.lineTo(d / 2 + 0.1, 0); tri.lineTo(0, rise); tri.closePath();
+    const tg = new THREE.ShapeGeometry(tri);
+    const t1 = new THREE.Mesh(tg, gableM); t1.position.set(w / 2, wallTop, 0); t1.rotation.y = Math.PI / 2;
+    const t2 = new THREE.Mesh(tg, gableM); t2.position.set(-w / 2, wallTop, 0); t2.rotation.y = -Math.PI / 2;
+    g.add(t1); g.add(t2);
+  }
+  // lattice window plane (front +Z face, or rotated for the sides)
+  function winPlane(g, w, h, x, y, z, ry) {
+    g.add(mesh(new THREE.PlaneGeometry(w, h), latticeMat, x, y, z, 0, ry || 0, 0));
+  }
+  // noren curtain: 3 short hanging panels above a door
+  function noren(g, y, z, color) {
+    const m = norenMat(color);
+    [-0.26, 0, 0.26].forEach(function (dx, i) {
+      g.add(mesh(new THREE.PlaneGeometry(0.24, i === 1 ? 0.34 : 0.28), m, dx, y, z));
+    });
+  }
+  // ---- Design A: 2-story machiya townhouse ----
+  function machiya(x, z, ry, s, o) {
     const g = new THREE.Group();
-    g.add(mesh(new THREE.BoxGeometry(2.2, 1.7, 2.0), mat(P.house), 0, 0.85, 0));
-    const roof = mesh(new THREE.ConeGeometry(1.9, 1.2, 4), mat(P.roof), 0, 2.3, 0, 0, Math.PI / 4, 0);
-    g.add(roof);
-    g.add(mesh(new THREE.BoxGeometry(0.7, 1.0, 0.08), mat(0x4a3423), 0, 0.5, 1.02));
-    const win = mat(P.window, { emissive: P.window, emissiveIntensity: 0.15 });
-    g.add(mesh(new THREE.PlaneGeometry(0.55, 0.55), win, -0.65, 1.1, 1.01));
-    g.add(mesh(new THREE.PlaneGeometry(0.55, 0.55), win, 0.65, 1.1, 1.01));
+    const W = 2.2, D = 2.0;
+    g.add(mesh(new THREE.BoxGeometry(W + 0.15, 0.28, D + 0.15), stoneMat, 0, 0.14, 0)); // stone foundation
+    g.add(mesh(new THREE.BoxGeometry(W, 1.5, D), plasterMat(o.wall), 0, 1.03, 0)); // ground floor
+    g.add(mesh(new THREE.BoxGeometry(W - 0.15, 1.15, D - 0.15), woodMat(o.wood), 0, 2.355, 0)); // upper floor
+    // wood corner posts + ground-floor beam
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function (p) {
+      g.add(mesh(new THREE.BoxGeometry(0.1, 1.5, 0.1), woodDark, p[0] * (W / 2 - 0.05), 1.03, p[1] * (D / 2 - 0.05)));
+    });
+    g.add(mesh(new THREE.BoxGeometry(W + 0.06, 0.12, D + 0.06), woodDark, 0, 1.82, 0));
+    gableRoof(g, W, D, 2.93, 0.9, roofMat(o.roof), woodMat(o.wood));
+    // door + noren + windows
+    g.add(mesh(new THREE.PlaneGeometry(0.8, 1.15), shojiMat, 0, 0.86, D / 2 + 0.02));
+    noren(g, 1.6, D / 2 + 0.06, o.noren);
+    winPlane(g, 0.6, 0.6, -0.72, 1.15, D / 2 + 0.02);
+    winPlane(g, 0.6, 0.6, 0.72, 1.15, D / 2 + 0.02);
+    winPlane(g, 0.55, 0.55, -0.6, 2.4, (D - 0.15) / 2 + 0.02);
+    winPlane(g, 0.55, 0.55, 0.6, 2.4, (D - 0.15) / 2 + 0.02);
+    winPlane(g, 0.55, 0.55, W / 2 + 0.02, 1.15, 0, Math.PI / 2);
+    winPlane(g, 0.55, 0.55, -W / 2 - 0.02, 1.15, 0, -Math.PI / 2);
+    if (o.balcony) { // upper-floor balcony with railing
+      g.add(mesh(new THREE.BoxGeometry(1.6, 0.07, 0.42), woodDark, 0, 1.95, D / 2 + 0.2));
+      [-0.72, -0.24, 0.24, 0.72].forEach(function (dx) {
+        g.add(mesh(new THREE.BoxGeometry(0.05, 0.42, 0.05), woodDark, dx, 2.19, D / 2 + 0.38));
+      });
+      g.add(mesh(new THREE.BoxGeometry(1.6, 0.05, 0.05), woodDark, 0, 2.42, D / 2 + 0.38));
+    }
+    g.add(mesh(new THREE.BoxGeometry(0.9, 0.1, 0.5), stoneMat, 0, 0.05, D / 2 + 0.3)); // step stone
     g.position.set(x, 0, z); g.rotation.y = ry; g.scale.setScalar(s || 1);
     scene.add(g);
+    addCollider(x, z, 1.5 * (s || 1)); // half-diagonal of the 2.2x2.0 footprint
+  }
+  // ---- Design B: shop with storefront ----
+  function shop(x, z, ry, s, o) {
+    const g = new THREE.Group();
+    const W = 2.2, D = 2.0;
+    g.add(mesh(new THREE.BoxGeometry(W + 0.15, 0.28, D + 0.15), stoneMat, 0, 0.14, 0));
+    g.add(mesh(new THREE.BoxGeometry(W, 1.6, D), woodMat(o.wood), 0, 1.08, 0)); // ground floor (wood)
+    g.add(mesh(new THREE.BoxGeometry(W - 0.1, 0.85, D - 0.1), plasterMat(o.wall), 0, 2.3, 0)); // low upper floor
+    gableRoof(g, W, D, 2.72, 0.7, roofMat(o.roof), plasterMat(o.wall));
+    // ridge-end ornaments
+    g.add(mesh(new THREE.SphereGeometry(0.09, 10, 8), darkTrim, -(W + 0.7) / 2, 3.45, 0));
+    g.add(mesh(new THREE.SphereGeometry(0.09, 10, 8), darkTrim, (W + 0.7) / 2, 3.45, 0));
+    // storefront: dark recessed opening + stall table + crates + fruit
+    g.add(mesh(new THREE.PlaneGeometry(1.1, 1.25), darkTrim, -0.3, 0.92, D / 2 + 0.02));
+    g.add(mesh(new THREE.BoxGeometry(1.3, 0.08, 0.55), woodDark, -0.3, 0.72, D / 2 + 0.35));
+    [[-0.65, 0.45], [0.05, 0.45]].forEach(function (p) {
+      g.add(mesh(new THREE.BoxGeometry(0.08, 0.72, 0.45), woodDark, p[0], 0.36, D / 2 + 0.35));
+    });
+    g.add(mesh(new THREE.BoxGeometry(0.34, 0.26, 0.3), woodMid, -0.6, 0.89, D / 2 + 0.35));
+    g.add(mesh(new THREE.BoxGeometry(0.3, 0.22, 0.28), woodMid, -0.15, 0.87, D / 2 + 0.35));
+    g.add(mesh(new THREE.SphereGeometry(0.09, 10, 8), mat(0xe8833a), 0.08, 0.85, D / 2 + 0.35));
+    g.add(mesh(new THREE.SphereGeometry(0.08, 10, 8), mat(0x7fb069), 0.22, 0.84, D / 2 + 0.3));
+    // striped awning + poles
+    g.add(mesh(new THREE.PlaneGeometry(1.9, 0.95), awningMat, -0.3, 1.95, D / 2 + 0.5, -0.5, 0, 0));
+    g.add(mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.5, 8), woodDark, -1.15, 0.95, D / 2 + 0.85));
+    g.add(mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.5, 8), woodDark, 0.55, 0.95, D / 2 + 0.85));
+    // sign board with painted sakura emblem (symbolic, no text) + door + noren
+    g.add(mesh(new THREE.BoxGeometry(0.48, 1.05, 0.07), woodDark, 0.78, 1.15, D / 2 + 0.05));
+    g.add(mesh(new THREE.PlaneGeometry(0.42, 0.99), emblemMat, 0.78, 1.15, D / 2 + 0.1));
+    noren(g, 1.62, D / 2 + 0.06, o.noren);
+    // paper lanterns flanking the storefront + upper windows
+    [-1.05, 0.45].forEach(function (dx) {
+      g.add(mesh(new THREE.SphereGeometry(0.13, 12, 10), lampMat, dx, 1.85, D / 2 + 0.18));
+      g.add(mesh(new THREE.ConeGeometry(0.15, 0.1, 10), darkTrim, dx, 2.0, D / 2 + 0.18));
+    });
+    winPlane(g, 0.55, 0.5, -0.55, 2.32, (D - 0.1) / 2 + 0.02);
+    winPlane(g, 0.55, 0.5, 0.55, 2.32, (D - 0.1) / 2 + 0.02);
+    winPlane(g, 0.55, 0.55, W / 2 + 0.02, 1.15, 0, Math.PI / 2);
+    g.position.set(x, 0, z); g.rotation.y = ry; g.scale.setScalar(s || 1);
+    scene.add(g);
+    addCollider(x, z, 1.65 * (s || 1)); // footprint + stall in front
+  }
+  // ---- Design C: minka cottage (hipped roof, round window) ----
+  function minka(x, z, ry, s, o) {
+    const g = new THREE.Group();
+    const W = 2.3, D = 2.1;
+    g.add(mesh(new THREE.BoxGeometry(W + 0.15, 0.3, D + 0.15), stoneMat, 0, 0.15, 0));
+    g.add(mesh(new THREE.BoxGeometry(W, 1.5, D), woodMat(o.wood), 0, 1.05, 0));
+    g.add(mesh(new THREE.BoxGeometry(W + 0.5, 0.09, D + 0.5), woodDark, 0, 1.83, 0)); // eaves slab
+    const hip = mesh(new THREE.ConeGeometry(2.05, 1.15, 4), roofMat(o.roof), 0, 2.45, 0, 0, Math.PI / 4, 0);
+    g.add(hip);
+    g.add(mesh(new THREE.BoxGeometry(0.9, 0.1, 0.2), darkTrim, 0, 3.02, 0)); // ridge cap
+    g.add(mesh(new THREE.PlaneGeometry(0.8, 1.15), shojiMat, -0.45, 0.88, D / 2 + 0.02)); // door
+    noren(g, 1.58, D / 2 + 0.06, o.noren);
+    g.add(mesh(new THREE.CircleGeometry(0.28, 24), latticeMat, 0.55, 1.2, D / 2 + 0.02)); // round window
+    winPlane(g, 0.55, 0.55, W / 2 + 0.02, 1.15, 0, Math.PI / 2);
+    winPlane(g, 0.55, 0.55, -W / 2 - 0.02, 1.15, 0, -Math.PI / 2);
+    // small wood fence segment beside the cottage
+    g.add(mesh(new THREE.BoxGeometry(0.07, 0.8, 0.07), woodDark, W / 2 + 0.7, 0.4, 0.5));
+    g.add(mesh(new THREE.BoxGeometry(0.07, 0.8, 0.07), woodDark, W / 2 + 0.7, 0.4, -0.5));
+    g.add(mesh(new THREE.BoxGeometry(0.05, 0.07, 1.07), woodDark, W / 2 + 0.7, 0.62, 0));
+    g.add(mesh(new THREE.BoxGeometry(0.05, 0.07, 1.07), woodDark, W / 2 + 0.7, 0.32, 0));
+    g.position.set(x, 0, z); g.rotation.y = ry; g.scale.setScalar(s || 1);
+    scene.add(g);
+    addCollider(x, z, 1.55 * (s || 1));
   }
   function tree(x, z, s) {
     const g = new THREE.Group();
+    g.add(mesh(new THREE.CylinderGeometry(0.42, 0.46, 0.14, 12), stoneMat, 0, 0.07, 0)); // v1.4: stone base ring
     g.add(mesh(new THREE.CylinderGeometry(0.14, 0.2, 1.1, 8), mat(0x7a5230), 0, 0.55, 0));
     const fol = mat(P.foliage);
     g.add(mesh(new THREE.SphereGeometry(0.95, 12, 10), fol, 0, 1.7, 0));
     g.add(mesh(new THREE.SphereGeometry(0.65, 12, 10), fol, 0.5, 1.3, 0.3));
     g.add(mesh(new THREE.SphereGeometry(0.6, 12, 10), fol, -0.5, 1.35, -0.2));
+    g.add(mesh(new THREE.SphereGeometry(0.45, 10, 8), mat(0xf8b8d0), 0.1, 2.2, -0.1)); // v1.4: lighter top puff
     g.position.set(x, 0, z); g.scale.setScalar(s || 1);
     scene.add(g);
+  }
+  // ---- v1.4 landmark: torii gate at the south end of the path ----
+  // The follow camera rides at y≈2.7, so the lower beam (nuki) sits at 2.95
+  // and the top lintel at 3.42 — the camera passes underneath, never through.
+  function torii(x, z) {
+    const g = new THREE.Group();
+    g.add(mesh(new THREE.BoxGeometry(0.42, 0.18, 0.42), stoneMat, -1.35, 0.09, 0));
+    g.add(mesh(new THREE.BoxGeometry(0.42, 0.18, 0.42), stoneMat, 1.35, 0.09, 0));
+    g.add(mesh(new THREE.CylinderGeometry(0.13, 0.15, 3.4, 10), vermilion, -1.35, 1.7, 0));
+    g.add(mesh(new THREE.CylinderGeometry(0.13, 0.15, 3.4, 10), vermilion, 1.35, 1.7, 0));
+    g.add(mesh(new THREE.BoxGeometry(3.0, 0.14, 0.16), vermilion, 0, 2.95, 0)); // nuki
+    g.add(mesh(new THREE.BoxGeometry(3.6, 0.2, 0.28), vermilion, 0, 3.42, 0)); // kasagi
+    g.add(mesh(new THREE.BoxGeometry(3.7, 0.08, 0.32), darkTrim, 0, 3.55, 0)); // top cap
+    g.add(mesh(new THREE.BoxGeometry(0.22, 0.34, 0.08), darkTrim, 0, 3.18, 0.12)); // center plaque (no text)
+    g.position.set(x, 0, z);
+    scene.add(g);
+    addCollider(x - 1.35, z, 0.3);
+    addCollider(x + 1.35, z, 0.3);
+  }
+  // ---- v1.4 props (all outside the main walking lanes, all with colliders) ----
+  function stoneLantern(x, z) {
+    const g = new THREE.Group();
+    g.add(mesh(new THREE.BoxGeometry(0.5, 0.12, 0.5), stoneMat, 0, 0.06, 0));
+    g.add(mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.55, 8), stoneMat, 0, 0.4, 0));
+    g.add(mesh(new THREE.BoxGeometry(0.42, 0.1, 0.42), stoneMat, 0, 0.72, 0));
+    g.add(mesh(new THREE.BoxGeometry(0.34, 0.3, 0.34), lampMat, 0, 0.92, 0));
+    g.add(mesh(new THREE.ConeGeometry(0.34, 0.22, 4), stoneMat, 0, 1.18, 0, 0, Math.PI / 4, 0));
+    g.add(mesh(new THREE.SphereGeometry(0.06, 8, 6), stoneMat, 0, 1.32, 0));
+    g.position.set(x, 0, z);
+    scene.add(g);
+    addCollider(x, z, 0.35);
+  }
+  function bench(x, z, ry) {
+    const g = new THREE.Group();
+    g.add(mesh(new THREE.BoxGeometry(1.5, 0.08, 0.45), woodMid, 0, 0.45, 0));
+    g.add(mesh(new THREE.BoxGeometry(0.08, 0.45, 0.4), woodDark, -0.62, 0.22, 0));
+    g.add(mesh(new THREE.BoxGeometry(0.08, 0.45, 0.4), woodDark, 0.62, 0.22, 0));
+    g.add(mesh(new THREE.BoxGeometry(1.5, 0.5, 0.06), woodMid, 0, 0.78, -0.2, -0.12, 0, 0));
+    g.position.set(x, 0, z); g.rotation.y = ry;
+    scene.add(g);
+    addCollider(x, z, 0.7);
+  }
+  function well(x, z) {
+    const g = new THREE.Group();
+    g.add(mesh(new THREE.CylinderGeometry(0.55, 0.6, 0.6, 14), stoneMat, 0, 0.3, 0));
+    g.add(mesh(new THREE.CircleGeometry(0.48, 14), mat(0x2e4a4a), 0, 0.58, 0, -Math.PI / 2, 0, 0)); // dark water
+    g.add(mesh(new THREE.BoxGeometry(0.08, 1.35, 0.08), woodDark, -0.58, 0.95, 0));
+    g.add(mesh(new THREE.BoxGeometry(0.08, 1.35, 0.08), woodDark, 0.58, 0.95, 0));
+    gableRoof(g, 1.5, 1.0, 1.6, 0.4, roofMat(0x8a4a3a), woodMid);
+    g.add(mesh(new THREE.CylinderGeometry(0.11, 0.09, 0.16, 10), woodDark, 0.3, 0.68, 0.2)); // bucket on the rim
+    g.position.set(x, 0, z);
+    scene.add(g);
+    addCollider(x, z, 0.75);
+  }
+  function fenceRun(x1, z1, x2, z2) { // wooden fence along a segment (outside the walk bounds)
+    const len = Math.hypot(x2 - x1, z2 - z1);
+    const n = Math.max(2, Math.round(len / 1.2) + 1);
+    const g = new THREE.Group();
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1);
+      g.add(mesh(new THREE.BoxGeometry(0.09, 0.9, 0.09), woodDark, (t - 0.5) * len, 0.45, 0));
+    }
+    g.add(mesh(new THREE.BoxGeometry(len, 0.07, 0.05), woodDark, 0, 0.62, 0));
+    g.add(mesh(new THREE.BoxGeometry(len, 0.07, 0.05), woodDark, 0, 0.32, 0));
+    g.position.set((x1 + x2) / 2, 0, (z1 + z2) / 2);
+    g.rotation.y = Math.atan2(-(z2 - z1), x2 - x1);
+    scene.add(g);
+  }
+  function flowerBed(x, z, ry) {
+    const g = new THREE.Group();
+    g.add(mesh(new THREE.BoxGeometry(1.3, 0.18, 0.55), mat(0x5a4230), 0, 0.09, 0));
+    const cols = [0xf2a0c0, 0xffffff, 0xffd166, 0xf2a0c0, 0xffd166, 0xffffff];
+    cols.forEach(function (c, i) {
+      const fx = -0.5 + (i % 3) * 0.5, fz = i < 3 ? -0.13 : 0.13;
+      g.add(mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.16, 6), mat(0x5e9a6a), fx, 0.24, fz));
+      g.add(mesh(new THREE.SphereGeometry(0.075, 8, 6), mat(c), fx, 0.34, fz));
+    });
+    g.position.set(x, 0, z); g.rotation.y = ry;
+    scene.add(g);
+    addCollider(x, z, 0.6);
   }
   function lantern(x, z) {
     const g = new THREE.Group();
@@ -161,13 +515,24 @@ function buildVillageEnv(scene) {
     g.add(mesh(new THREE.ConeGeometry(0.32, 0.22, 10), mat(0x8a4a3a), 0, 2.22, 0));
     g.position.set(x, 0, z); scene.add(g);
   }
-  house(-4.4, -4.5, 0.4, 1); house(4.6, -5, -0.3, 1.1); house(5.2, -1, -0.5, 0.85); house(-5, -0.5, 0.5, 0.85);
+  // v1.4: same 4 footprints/positions/rotations/scales as the v1 houses —
+  // only the designs are new (3 distinct designs; the 4th is a machiya variant).
+  machiya(-4.4, -4.5, 0.4, 1, { wall: 0xf5e6c8, wood: 0x9a6a42, roof: 0xb85c4a, noren: 0x2e4a7a, balcony: true });
+  shop(4.6, -5, -0.3, 1.1, { wall: 0xf7ead2, wood: 0x8b5e3c, roof: 0x5a6a7a, noren: 0xd96c8a });
+  minka(5.2, -1, -0.5, 0.85, { wood: 0xa5713f, roof: 0x6a5a4a, noren: 0x5e9a6a });
+  machiya(-5, -0.5, 0.5, 0.85, { wall: 0xefe0c2, wood: 0x7a5230, roof: 0x8a4a3a, noren: 0x8a4a6a, balcony: false });
+  // v1.4 landmark + props (positions chosen outside the main walking lanes
+  // and clear of every NPC hit cylinder; see NOTES.md for the distances)
+  torii(0, 5.9);
+  stoneLantern(-2.9, 2.9); stoneLantern(3.0, -2.6);
+  bench(3.2, 3.4, -0.6); bench(-3.4, 3.6, 0.5);
+  well(-4.2, 4.6);
+  fenceRun(-6.2, -6.4, 6.2, -6.4); // north edge (outside minZ = -6)
+  fenceRun(-6.8, -5.5, -6.8, 6.0); // west edge (outside minX = -6.5)
+  fenceRun(6.8, -5.5, 6.8, 6.0); // east edge (outside maxX = 6.5)
+  flowerBed(-4.4, -3.2, 0.4); flowerBed(4.6, -3.6, -0.3);
   tree(-3.2, -2.5, 1.1); tree(3.4, -2.8, 1); tree(-4.8, 2.2, 0.9); tree(4.9, 2.4, 1.05); tree(1.8, -6.5, 1.2); tree(-2, -6.8, 1);
   lantern(-1.6, -1.2); lantern(1.7, -0.6); lantern(1.8, 4.2);
-  const pet = mat(0xf9a8d4);
-  [[-2.5, 2.6, -1], [2.2, 2.2, 1.5], [0.8, 3.0, -3], [-0.6, 2.4, 2.8]].forEach(function (p) {
-    scene.add(mesh(new THREE.OctahedronGeometry(0.12), pet, p[0], p[1], p[2]));
-  });
   // NPCs: the other 3 default characters, standing in the plaza (static in v1)
   const npcs = [
     { x: -2.1, z: 1.0, ry: 0.5, name: 'سارة', sub: 'المستوى 12', key: 'sara' },
@@ -196,7 +561,16 @@ function buildVillageEnv(scene) {
     scene.add(sp);
     handles.push({ key: p.key, group: a });
   }
-  return { npcs: handles };
+  // v1.4: colliders + a stats inventory for tests/NOTES.md
+  return {
+    npcs: handles,
+    colliders: colliders,
+    stats: {
+      buildings: 4, designs: ['machiya', 'shop', 'minka', 'machiya-variant'],
+      torii: true, stoneLanterns: 2, benches: 2, well: 1, fences: 3,
+      flowerBeds: 2, trees: 6, poleLanterns: 3, colliders: colliders.length,
+    },
+  };
 }
 
 // ================= HOME environment (no player avatar) =================
