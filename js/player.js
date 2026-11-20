@@ -1,7 +1,13 @@
-// Suli Anime v1 — playable VRM character: procedural walk + follow camera.
+// Suli Anime v1.1 — playable VRM character: procedural walk + follow camera.
 // The VRM model ships with NO animation clips, so walking is procedural:
 // legs/arms swing by rotating their bones, hips bob, and everything eases
 // back to the standing pose when the player stops.
+//
+// v1.1 rebuilds the walk cycle from gait biomechanics (see _pose):
+// correct knee timing (flex in swing, straight at heel-strike), ankle/toe
+// articulation, hip yaw/roll/bob, spine counter-rotation, forward lean,
+// and stride-matched stepping — the phase advances with DISTANCE TRAVELLED,
+// so foot speed matches ground speed and the feet don't slide.
 import * as THREE from 'three';
 
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
@@ -11,6 +17,53 @@ function lerpAngle(a, b, t) {
   if (d > Math.PI) d -= Math.PI * 2;
   if (d < -Math.PI) d += Math.PI * 2;
   return a + d * t;
+}
+
+// ---- walk-cycle tuning (measured on the dero VRM at fit height 1.45) ----
+// Hip-joint height 0.784, ankle height 0.098 -> leg length 0.686.
+// Hip swing +-0.58 rad gives a 0.75-unit step; at 2.4 u/s that is a
+// brisk ~3.2 steps/s — right for a 1.45-tall character at this speed.
+// Gait events for the LEFT leg (right leg = same, phase + PI):
+//   phase 0     = left mid-swing (passing), right mid-stance
+//   phase PI/2  = left heel-strike, right toe-off (double support)
+//   phase PI    = right mid-swing (passing), left mid-stance
+//   phase 3PI/2 = left toe-off, right heel-strike (double support)
+const HIP_AMP = 0.58;        // hip swing amplitude (rad), each way
+const LEG_LEN_FALLBACK = 0.686; // hip-joint -> ankle, measured on the rig
+const KNEE_SWING = 0.95;     // peak knee flexion mid-swing (rad)
+const KNEE_SHIFT = 0.15;     // shifts the knee peak into early-mid swing;
+                             // small on purpose: the knee must still be
+                             // nearly straight at toe-off (~0.10 rad) or
+                             // the toe lifts off the ground before push-off
+                             // (0.64 left the trailing toe 0.17 in the air,
+// 0.30 still left it 0.085 up)
+const KNEE_STANCE = 0.14;    // loading-response flex just after heel-strike
+const FOOT_TOEOFF = 0.50;    // foot pitch (toes down) at push-off
+const FOOT_HEEL = 0.16;      // foot pitch (toes up) at heel-strike
+const TOE_FLEX = 0.55;       // toe-base flex at push-off
+const HIP_YAW = 0.12, HIP_ROLL = 0.07;
+const SPINE_YAW = 0.03, CHEST_YAW = 0.05, UPPER_YAW = 0.04;
+const ARM_SWING = 0.50;
+const ELBOW_BASE = 0.35, ELBOW_VAR = 0.15;
+const STEP_WIDTH = 0.07;     // swing foot drifts slightly outward (rad) —
+                             // real step width, and it keeps the legs
+                             // distinct from the follow camera behind
+// Elbow hinge axis on the posed-down forearm: the forearm's local X is
+// nearly the arm's long axis (a twist, not a bend — v1's fixed -0.25 x
+// moved the hand by ~1mm), so flexion is mostly local Y:
+// left (0.315, -0.949), right (0.315, +0.949) — measured on the rig.
+const ELBOW_X = 0.315, ELBOW_Y = 0.949;
+const BOB_FACTOR = 0.85;     // fraction of the geometric hip drop to apply
+                             // (0.9 sank the heel ~9mm at heel-strike;
+// the shin has a slight backward rest offset that adds drop when swung)
+
+// Hip swing waveform: mostly a triangle wave (near-constant foot speed
+// during stance -> the planted foot stays planted) with a sine blend to
+// round the heel-strike / toe-off corners. Peaks at +-1, same phases
+// as sin(), so all gait events stay at their usual phases.
+function hipWave(p) {
+  const tri = (2 / Math.PI) * Math.asin(Math.sin(p));
+  return 0.8 * tri + 0.2 * Math.sin(p);
 }
 
 class Player {
@@ -33,8 +86,14 @@ class Player {
     const b = (n) => model.getObjectByName(n);
     this.bones = {
       hips: b('J_Bip_C_Hips'),
+      spine: b('J_Bip_C_Spine'),
+      chest: b('J_Bip_C_Chest'),
+      upperChest: b('J_Bip_C_UpperChest'),
+      head: b('J_Bip_C_Head'),
       legL: b('J_Bip_L_UpperLeg'), legR: b('J_Bip_R_UpperLeg'),
       kneeL: b('J_Bip_L_LowerLeg'), kneeR: b('J_Bip_R_LowerLeg'),
+      footL: b('J_Bip_L_Foot'), footR: b('J_Bip_R_Foot'),
+      toeL: b('J_Bip_L_ToeBase'), toeR: b('J_Bip_R_ToeBase'),
       armL: b('J_Bip_L_UpperArm'), armR: b('J_Bip_R_UpperArm'),
       foreL: b('J_Bip_L_LowerArm'), foreR: b('J_Bip_R_LowerArm'),
     };
@@ -44,6 +103,25 @@ class Player {
       const bone = this.bones[k];
       if (bone) this.rest[k] = bone.rotation.clone();
     }
+    // Stride geometry: measure the hip-joint -> ankle length on the fitted
+    // model (falls back to the measured constant if the bones are missing).
+    // A full cycle (2 steps) covers 2 * stepLength, and
+    // stepLength = 2 * legLen * sin(hipAmp), so:
+    //   phasePerUnit = 2*PI / (2 * stepLength) = PI / (2*L*sin(hipAmp)).
+    let legLen = LEG_LEN_FALLBACK;
+    try {
+      model.updateMatrixWorld(true);
+      const hj = this.bones.legL, an = this.bones.footL;
+      if (hj && an) {
+        const a = new THREE.Vector3(), c = new THREE.Vector3();
+        hj.getWorldPosition(a); an.getWorldPosition(c);
+        const m = a.y - c.y;
+        if (m > 0.2 && m < 2) legLen = m;
+      }
+    } catch (e) { /* keep the fallback */ }
+    this._legLen = legLen;
+    this._phasePerUnit = Math.PI / (2 * legLen * Math.sin(HIP_AMP));
+    this._speedFactor = 0;            // eased 0..1, scales the forward lean
   }
 
   setTarget(x, z) {
@@ -73,6 +151,7 @@ class Player {
     }
     this.moving = mag > 0.02;
     if (this.moving) {
+      const ox = this.model.position.x, oz = this.model.position.z;
       const step = this.speed * mag * dt;
       this.model.position.x = clamp(this.model.position.x + mx * step, this.bounds.minX, this.bounds.maxX);
       this.model.position.z = clamp(this.model.position.z + mz * step, this.bounds.minZ, this.bounds.maxZ);
@@ -80,38 +159,111 @@ class Player {
       const want = Math.atan2(-mx, -mz);
       this.facing = lerpAngle(this.facing, want, Math.min(1, dt * 10));
       this.model.rotation.y = this.facing;
-      this.phase += dt * 9 * Math.max(0.4, mag); // ~1.4 steps/sec at full speed
+      // Stride-matched stepping: advance the cycle by the distance ACTUALLY
+      // travelled this frame (after bounds clamping), so foot speed matches
+      // ground speed and the feet don't slide. Slower input (joystick tilt,
+      // tap-to-move approach) automatically slows the cadence.
+      const dist = Math.hypot(this.model.position.x - ox, this.model.position.z - oz);
+      this.phase += dist * this._phasePerUnit;
     }
     // ease the walk pose in/out
     const goal = this.moving ? 1 : 0;
     this.walkAmount += (goal - this.walkAmount) * Math.min(1, dt * 8);
     if (!this.moving && this.walkAmount < 0.02) this.walkAmount = 0;
+    // ease the speed factor (forward lean) so it never pops on stop/start
+    this._speedFactor += ((this.moving ? mag : 0) - this._speedFactor) * Math.min(1, dt * 4);
     this._pose();
     return this.moving;
   }
 
   _pose() {
     const w = this.walkAmount;
-    const s = Math.sin(this.phase);
-    const c = Math.cos(this.phase);
+    const p = this.phase;
     const B = this.bones, R = this.rest;
-    const setX = (bone, rest, x) => { if (bone) bone.rotation.x = rest.x + x * w; };
-    if (B.legL && R.legL) setX(B.legL, R.legL, s * 0.55);
-    if (B.legR && R.legR) setX(B.legR, R.legR, -s * 0.55);
-    // knees bend when the leg swings back / lifts
-    if (B.kneeL && R.kneeL) setX(B.kneeL, R.kneeL, Math.max(0, -s) * 0.7 + 0.06 * w);
-    if (B.kneeR && R.kneeR) setX(B.kneeR, R.kneeR, Math.max(0, s) * 0.7 + 0.06 * w);
-    // arms swing opposite to the same-side leg; z stays at the posed value
-    if (B.armL && R.armL) setX(B.armL, R.armL, -s * 0.4);
-    if (B.armR && R.armR) setX(B.armR, R.armR, s * 0.4);
-    if (B.foreL && R.foreL) setX(B.foreL, R.foreL, -0.25 * w);
-    if (B.foreR && R.foreR) setX(B.foreR, R.foreR, -0.25 * w);
-    // hips: gentle bob (twice per cycle) + slight sway
-    if (B.hips && R.hips) {
-      B.hips.rotation.z = R.hips.z + Math.sin(this.phase) * 0.05 * w;
-      B.hips.rotation.x = R.hips.x + Math.sin(this.phase * 2) * 0.03 * w;
-    }
-    this.model.position.y = this.baseY + Math.abs(c) * 0.045 * w;
+    // every animated axis is rest + offset * walkAmount, so at w = 0 the
+    // standing pose is EXACTLY the rest pose
+    const setX = (bone, rest, x) => { if (bone && rest) bone.rotation.x = rest.x + x * w; };
+    const setXY = (bone, rest, x, y) => {
+      if (!bone || !rest) return;
+      bone.rotation.x = rest.x + x * w;
+      bone.rotation.y = rest.y + y * w;
+    };
+    const setXYZ = (bone, rest, x, y, z) => {
+      if (!bone || !rest) return;
+      bone.rotation.x = rest.x + x * w;
+      bone.rotation.y = rest.y + y * w;
+      bone.rotation.z = rest.z + z * w;
+    };
+
+    const s = Math.sin(p), c = Math.cos(p);
+    const waveL = hipWave(p);         // +1: left leg max forward (heel-strike)
+    const waveR = -waveL;
+    const lean = 0.5 + 0.5 * this._speedFactor; // forward lean grows with speed
+
+    // ---- legs: hips swing front/back (+ a touch of step width: the swing
+    // foot drifts slightly outward so the legs stay distinct from behind) ----
+    const hipL = HIP_AMP * waveL, hipR = HIP_AMP * waveR;
+    // swing factor: 0 in stance, peaks mid-swing (shared by knee + step width)
+    const swingFor = (ph) => Math.pow(Math.max(0, Math.cos(ph + KNEE_SHIFT)), 1.2);
+    const swL = swingFor(p), swR = swingFor(p + Math.PI);
+    setXYZ(B.legL, R.legL, hipL, 0, -STEP_WIDTH * swL);
+    setXYZ(B.legR, R.legR, hipR, 0, STEP_WIDTH * swR);
+
+    // ---- knees: flex during swing-through, near-straight at heel-strike
+    // and during stance (plus a small loading-response flex just after
+    // heel-strike). Flexion is NEGATIVE x on this rig — positive x bends
+    // the knee forward (hyperextension), which is what v1 did.
+    // NOTE: sin(2*ph - PI) has TWO positive lobes per cycle; the gate
+    // (sin(ph) > 0) keeps the loading bump on the stance lobe only —
+    // without it the bump fired during swing too and over-flexed the knee
+    // to 1.04 rad, lifting the swing foot far too high.
+    const kneeFor = (ph) => -(KNEE_SWING * swingFor(ph)
+      + KNEE_STANCE * Math.max(0, Math.sin(2 * ph - Math.PI)) * (Math.sin(ph) > 0 ? 1 : 0));
+    const kneeL = kneeFor(p), kneeR = kneeFor(p + Math.PI);
+    setX(B.kneeL, R.kneeL, kneeL);
+    setX(B.kneeR, R.kneeR, kneeR);
+
+    // ---- hips: yaw with the stride, roll sway, lean + tiny pitch wobble ----
+    // (computed before the ankles: the ankle compensation needs the hip pitch)
+    const hipPitch = -0.02 * lean + 0.015 * Math.sin(2 * p);
+    setXYZ(B.hips, R.hips, hipPitch, -HIP_YAW * s, HIP_ROLL * c);
+
+    // ---- ankles: keep the foot level in world space (compensate the hip +
+    // knee pitch), then add the gait shape: toes up at heel-strike, toes
+    // down (heel up) at push-off. Foot world pitch ends up = footShape.
+    const footShape = (ph) => {
+      const u = -Math.sin(ph); // +1 at toe-off, -1 at heel-strike
+      return u > 0 ? -FOOT_TOEOFF * Math.pow(u, 1.2) : -FOOT_HEEL * u;
+    };
+    setX(B.footL, R.footL, -(hipL + kneeL + hipPitch) + footShape(p));
+    setX(B.footR, R.footR, -(hipR + kneeR + hipPitch) + footShape(p + Math.PI));
+
+    // ---- toes: stay on the ground while the heel rises at push-off ----
+    const toeFor = (ph) => TOE_FLEX * Math.pow(Math.max(0, -Math.sin(ph)), 1.5);
+    setX(B.toeL, R.toeL, toeFor(p));
+    setX(B.toeR, R.toeR, toeFor(p + Math.PI));
+
+    // ---- spine/chest: counter-rotate against the hips; lean forward ----
+    setXYZ(B.spine, R.spine, -0.035 * lean, SPINE_YAW * s, 0);
+    setXYZ(B.chest, R.chest, -0.03 * lean, CHEST_YAW * s, 0);
+    setXYZ(B.upperChest, R.upperChest, -0.02 * lean, UPPER_YAW * s, 0);
+    setX(B.head, R.head, 0.05 * lean); // head tilts back slightly: gaze stays level
+
+    // ---- arms: swing opposite to the same-side leg; elbows gently bent,
+    // bending a little more as the arm swings forward ----
+    setX(B.armL, R.armL, -ARM_SWING * waveL);
+    setX(B.armR, R.armR, -ARM_SWING * waveR);
+    const flexL = ELBOW_BASE + ELBOW_VAR * Math.max(0, -waveL);
+    const flexR = ELBOW_BASE + ELBOW_VAR * Math.max(0, -waveR);
+    setXY(B.foreL, R.foreL, ELBOW_X * flexL, -ELBOW_Y * flexL);
+    setXY(B.foreR, R.foreR, ELBOW_X * flexR, ELBOW_Y * flexR);
+
+    // ---- hips bob: lowest at double support (legs apart), highest at
+    // passing (stance leg vertical). The drop is the geometric one — the
+    // leg shortens by L*(1-cos(angle)) as it angles away from vertical —
+    // scaled by BOB_FACTOR so the bounce stays lively, not springy.
+    const drop = this._legLen * (1 - Math.cos(HIP_AMP * Math.abs(waveL))) * BOB_FACTOR;
+    this.model.position.y = this.baseY - drop * w;
   }
 
   get position() { return this.model.position; }

@@ -468,7 +468,7 @@ const screens = {
 let current = 'home';
 
 window.__suli = {
-  version: '1.0.0',
+  version: '1.1.0',
   screen: 'home',
   ready: {},
   playerPos: (name) => {
