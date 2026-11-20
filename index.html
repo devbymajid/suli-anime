@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#FBF3E2">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23D96C8A'/%3E%3C/svg%3E">
+<title>Suli Anime</title>
+<link rel="stylesheet" href="./css/style.css">
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
+</head>
+<body>
+<div class="app">
+
+  <!-- ===== top bar ===== -->
+  <div class="tb">
+    <span class="icbtn" id="topBack" style="display:none" title="رجوع">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </span>
+    <span class="logo" dir="ltr">Suli Anime</span>
+    <span class="sp"></span>
+    <span class="pill" id="topCoins">1,250 عملة</span>
+  </div>
+
+  <div class="screens">
+
+    <!-- ===== 1. HOME ===== -->
+    <section class="screen on" id="screen-home">
+      <div class="hero vp" id="homeVp">
+        <div class="name ovl"><b>كايتو</b><span>المستوى 5</span></div>
+        <span class="ovl pill" style="top:12px;left:14px">أهلاً بك في سولي</span>
+        <div class="load" id="homeLoad">
+          <div class="spin"></div><b>جارٍ تحميل كايتو</b>
+          <p>النموذج ثلاثي الأبعاد كبير قليلاً، لحظات فقط</p>
+        </div>
+      </div>
+      <div class="entries">
+        <div class="entry" data-goto="village">
+          <span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 L7 9 H10 L5 15 H19 L14 9 H17 Z"/><line x1="12" y1="15" x2="12" y2="21"/></svg></span>
+          <div><b>القرية</b><span>تجول واستكشف</span></div>
+        </div>
+        <div class="entry" data-goto="room">
+          <span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></span>
+          <div><b>المنزل</b><span>غرفتك الخاصة</span></div>
+        </div>
+        <div class="entry" data-goto="creator">
+          <span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></span>
+          <div><b>صمّم شخصيتك</b><span>الشعر والملابس</span></div>
+        </div>
+        <div class="entry" data-goto="cinema">
+          <span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none"/></svg></span>
+          <div><b>السينما</b><span>تفتح قريباً</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 2. VILLAGE ===== -->
+    <section class="screen" id="screen-village">
+      <div class="vp" id="villageVp">
+        <span class="ovl pill" style="top:12px;right:12px;font-size:14px">قرية ساكورا</span>
+        <span class="ovl pill" style="top:12px;left:12px">لاعب واحد</span>
+        <div class="joy" id="joyVillage"><div class="knob" id="knobVillage"></div></div>
+        <span class="hint pill">اسحب العصا أو المس الأرض للمشي</span>
+        <div class="load" id="villageLoad">
+          <div class="spin"></div><b>جارٍ تحميل القرية</b>
+          <p>نبني البيوت والأشجار ونحضّر كايتو</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 3. HOME ROOM ===== -->
+    <section class="screen" id="screen-room">
+      <div class="vp" id="roomVp">
+        <span class="ovl pill" style="top:12px;right:12px;font-size:14px">منزل كايتو</span>
+        <div class="joy" id="joyRoom"><div class="knob" id="knobRoom"></div></div>
+        <span class="hint pill">اسحب العصا أو المس الأرض للمشي</span>
+        <div class="load" id="roomLoad">
+          <div class="spin"></div><b>جارٍ تحميل المنزل</b>
+          <p>نرتّب الغرفة ونحضّر كايتو</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 4. CHARACTER CREATOR ===== -->
+    <section class="screen" id="screen-creator">
+      <div class="scroll" style="display:flex;flex-direction:column">
+        <div class="hd">صمّم شخصيتك</div>
+        <div class="vp" style="flex:none;height:300px">
+          <div class="ovl" style="inset:0;display:flex;flex-direction:column;padding:10px 16px 12px;pointer-events:none">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex:none">
+              <span class="pill">معاينة حية</span>
+              <span style="font-size:12px;font-weight:800">اختر شخصيتك</span>
+            </div>
+            <div style="flex:1;display:flex;gap:10px;margin-top:8px;min-height:0;pointer-events:auto">
+              <div style="display:flex;flex-direction:column;align-items:center;flex:none;height:100%">
+                <div class="prev"><div class="vp3d" id="creatorPreview"></div></div>
+                <div class="shadow-el"></div>
+              </div>
+              <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:9px;min-height:0">
+                <div class="pick on" data-char="kaito"><span class="tk"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><div class="thumb3d" data-char="kaito"></div><b>كايتو</b></div>
+                <div class="pick" data-char="yusuf"><div class="thumb3d" data-char="yusuf"></div><b>يوسف</b></div>
+                <div class="pick" data-char="sara"><div class="thumb3d" data-char="sara"></div><b>سارة</b></div>
+                <div class="pick" data-char="layan"><div class="thumb3d" data-char="layan"></div><b>ليان</b></div>
+              </div>
+            </div>
+          </div>
+          <div class="load" id="creatorLoad">
+            <div class="spin"></div><b>جارٍ تحميل المصمّم</b>
+            <p>نحضّر الشخصيات الأربع</p>
+          </div>
+        </div>
+
+        <div style="padding:10px 16px 0;display:flex;gap:10px;align-items:center">
+          <div class="card" style="flex:1;padding:8px 13px;display:flex;justify-content:space-between;align-items:center">
+            <span class="mut" style="font-size:12px">اسم الشخصية</span>
+            <input id="charName" value="كايتو" maxlength="16"
+              style="border:none;outline:none;font:inherit;font-size:15px;font-weight:800;text-align:left;width:120px;background:transparent;color:#3E2C22">
+          </div>
+          <div class="seg" style="width:132px" id="genderSeg"><div class="on" data-g="m">ذكر</div><div data-g="f">أنثى</div></div>
+        </div>
+
+        <div class="tabs" style="margin-top:10px" id="creatorTabs">
+          <div class="tab on" data-panel="hair">الشعر</div>
+          <div class="tab" data-panel="face">الوجه</div>
+          <div class="tab" data-panel="eyes">العينان</div>
+          <div class="tab" data-panel="body">الجسم</div>
+          <div class="tab" data-panel="clothes">الملابس</div>
+          <div class="tab" data-panel="skin">البشرة</div>
+        </div>
+
+        <div style="padding:10px 16px 0">
+          <div class="panel on" data-panel="hair">
+            <div class="lbl">تسريحة الشعر</div>
+            <div style="display:flex;gap:9px" data-group="hairstyle">
+              <div class="opt on" data-v="short"><span class="tk"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><div class="sw" style="background:#4a2c2a"></div><b>قصير</b></div>
+              <div class="opt" data-v="long"><div class="sw" style="background:#2d1b2e;height:44px;border-radius:18px"></div><b>طويل</b></div>
+              <div class="opt" data-v="pony"><div class="sw" style="background:#e8a33d;border-radius:50% 50% 42% 42%"></div><b>ذيل حصان</b></div>
+              <div class="opt" data-v="curly"><div class="sw" style="background:#6b4226;border:3px dashed rgba(255,255,255,.55)"></div><b>مجعّد</b></div>
+            </div>
+            <div style="display:flex;align-items:center;gap:11px;margin-top:12px">
+              <span style="font-size:13px;font-weight:800">اللون</span>
+              <span data-group="haircolor" style="display:flex;gap:11px">
+                <span class="dot" data-v="#1f2937" style="background:#1f2937"></span>
+                <span class="dot on" data-v="#4a2c2a" style="background:#4a2c2a"></span>
+                <span class="dot" data-v="#e8a33d" style="background:#e8a33d"></span>
+                <span class="dot" data-v="#b91c1c" style="background:#b91c1c"></span>
+                <span class="dot" data-v="#22d3ee" style="background:#22d3ee"></span>
+                <span class="dot" data-v="#f472b6" style="background:#f472b6"></span>
+              </span>
+            </div>
+          </div>
+          <div class="panel" data-panel="face">
+            <div class="lbl">شكل الوجه</div>
+            <div style="display:flex;gap:9px" data-group="face">
+              <div class="opt on" data-v="round"><span class="tk"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><div class="sw" style="background:#ffd9b3"></div><b>مستدير</b></div>
+              <div class="opt" data-v="oval"><div class="sw" style="background:#ffd9b3;border-radius:50% 50% 40% 40%"></div><b>بيضاوي</b></div>
+              <div class="opt" data-v="sharp"><div class="sw" style="background:#ffd9b3;border-radius:12px"></div><b>حاد</b></div>
+              <div class="opt" data-v="soft"><div class="sw" style="background:#ffd9b3;border-radius:50%;border:3px solid #f4a7b9"></div><b>ناعم</b></div>
+            </div>
+          </div>
+          <div class="panel" data-panel="eyes">
+            <div class="lbl">لون العينين</div>
+            <div style="display:flex;gap:11px" data-group="eyecolor">
+              <span class="dot on" data-v="#4a2c2a" style="background:#4a2c2a"></span>
+              <span class="dot" data-v="#2f7fc4" style="background:#2f7fc4"></span>
+              <span class="dot" data-v="#5e9a6a" style="background:#5e9a6a"></span>
+              <span class="dot" data-v="#8b5cf6" style="background:#8b5cf6"></span>
+              <span class="dot" data-v="#b91c1c" style="background:#b91c1c"></span>
+              <span class="dot" data-v="#e8a33d" style="background:#e8a33d"></span>
+            </div>
+            <div class="lbl" style="margin-top:12px">شكل العينين</div>
+            <div style="display:flex;gap:9px" data-group="eyeshape">
+              <div class="opt on" data-v="big"><span class="tk"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><div class="sw" style="background:#fff;border:2px solid #2f7fc4"></div><b>كبيرتان</b></div>
+              <div class="opt" data-v="calm"><div class="sw" style="background:#fff;border:2px solid #8A7A6B;height:28px"></div><b>هادئتان</b></div>
+              <div class="opt" data-v="sharp"><div class="sw" style="background:#fff;border:2px solid #b91c1c;border-radius:8px"></div><b>حادّتان</b></div>
+            </div>
+          </div>
+          <div class="panel" data-panel="body">
+            <div class="lbl">بنية الجسم</div>
+            <div style="display:flex;gap:9px" data-group="build">
+              <div class="opt" data-v="slim"><div class="sw" style="background:#e8d9b8;width:26px"></div><b>نحيف</b></div>
+              <div class="opt on" data-v="medium"><span class="tk"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><div class="sw" style="background:#e8d9b8"></div><b>متوسط</b></div>
+              <div class="opt" data-v="sporty"><div class="sw" style="background:#e8d9b8;width:44px"></div><b>رياضي</b></div>
+            </div>
+            <p class="mut" style="font-size:12px;line-height:1.7;margin-top:10px">الجسم الرياضي يأتي من التدريب داخل اللعبة، ويظهر هنا في المعاينة</p>
+          </div>
+          <div class="panel" data-panel="clothes">
+            <div class="lbl">الزي</div>
+            <div style="display:flex;gap:9px" data-group="outfit">
+              <div class="opt on" data-v="hoodie-white"><span class="tk"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><div class="sw" style="background:#f5f5f5"></div><b>هودي أبيض</b></div>
+              <div class="opt" data-v="suit"><div class="sw" style="background:#2e2e3d"></div><b>بدلة سوداء</b></div>
+              <div class="opt" data-v="tee"><div class="sw" style="background:#1e1e26"></div><b>قميص أسود</b></div>
+              <div class="opt" data-v="hoodie-black"><div class="sw" style="background:#2b2f3a"></div><b>هودي أسود</b></div>
+            </div>
+          </div>
+          <div class="panel" data-panel="skin">
+            <div class="lbl">لون البشرة</div>
+            <div style="display:flex;gap:11px" data-group="skin">
+              <span class="dot" data-v="#ffe3c2" style="background:#ffe3c2"></span>
+              <span class="dot on" data-v="#ffd9b3" style="background:#ffd9b3"></span>
+              <span class="dot" data-v="#f0c297" style="background:#f0c297"></span>
+              <span class="dot" data-v="#d9a06f" style="background:#d9a06f"></span>
+              <span class="dot" data-v="#b07d4f" style="background:#b07d4f"></span>
+              <span class="dot" data-v="#8a5a33" style="background:#8a5a33"></span>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding:12px 16px 0;display:flex;align-items:center;gap:12px">
+          <span style="font-size:13px;font-weight:800">الطول</span>
+          <input type="range" class="slider" id="heightSlider" min="150" max="195" value="175">
+          <b style="font-size:13px;min-width:52px;text-align:left" id="heightLabel">175 سم</b>
+        </div>
+        <div style="padding:10px 16px 0">
+          <div class="card" style="padding:10px 13px;display:flex;align-items:center;gap:10px">
+            <span style="color:#D96C8A"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5L17.5 17.5"/><path d="M21 21l-1-1"/><path d="M3 3l1 1"/><path d="M18 22l4-4"/><path d="M2 6l4-4"/><path d="M3 10l7-7"/><path d="M14 21l7-7"/></svg></span>
+            <div style="flex:1"><b style="font-size:13px">جسم رياضي</b><div class="mut" style="font-size:11px;margin-top:2px">التدريب المنتظم يحافظ عليه</div></div>
+            <span class="switch on" id="athleticSwitch"><i></i></span>
+          </div>
+        </div>
+        <p class="mut" style="font-size:12px;line-height:1.8;padding:0 16px;margin:12px 0 0">خيارات الشعر والملابس تُحفظ الآن وستظهر على شخصيتك في التحديث القادم — الطول والجسم الرياضي يظهران في المعاينة فوراً</p>
+        <div style="padding:12px 16px 16px"><button class="btn" id="saveCharBtn">حفظ الشخصية</button></div>
+      </div>
+    </section>
+
+    <!-- ===== 5. CINEMA (shell in v1) ===== -->
+    <section class="screen" id="screen-cinema">
+      <div class="soon">
+        <span class="big"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none"/></svg></span>
+        <b>السينما قريباً</b>
+        <p>هنا ستشاهد فيديوهات سولي مع أصدقائك داخل اللعبة. هذه النسخة الأولى تركّز على القرية والمنزل وتصميم الشخصية</p>
+      </div>
+    </section>
+
+    <!-- ===== 6. ACCOUNT (display only in v1) ===== -->
+    <section class="screen" id="screen-account">
+      <div class="scroll">
+        <div class="hd" style="padding-top:10px">حسابي</div>
+        <div style="padding:8px 16px 0">
+          <div class="card">
+            <div class="stat"><span>اسم الشخصية</span><b id="accName">كايتو</b></div>
+            <div class="stat"><span>المستوى</span><b>5</b></div>
+            <div class="stat"><span>العملات</span><b>1,250</b></div>
+            <div class="stat" style="display:none"><span>الأصدقاء</span><b>3</b></div>
+          </div>
+        </div>
+        <div style="padding:14px 16px">
+          <button class="btn ghost" id="accToCreator">تعديل شخصيتي</button>
+        </div>
+        <p class="mut" style="font-size:12px;line-height:1.8;padding:0 16px">هذه النسخة الأولى تعمل من دون حساب حقيقي: بياناتك محفوظة على جهازك فقط، ولا يوجد لعب جماعي بعد</p>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ===== bottom nav ===== -->
+  <nav class="bn" id="bottomNav">
+    <button class="it on" data-screen="home">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span>الرئيسية</span>
+    </button>
+    <button class="it" data-screen="village">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 L7 9 H10 L5 15 H19 L14 9 H17 Z"/><line x1="12" y1="15" x2="12" y2="21"/></svg>
+      <span>القرية</span>
+    </button>
+    <button class="it" data-screen="room">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="12" r="2"/></svg>
+      <span>المنزل</span>
+    </button>
+    <button class="it" data-screen="cinema">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none"/></svg>
+      <span>السينما</span>
+    </button>
+    <button class="it" data-screen="account">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span>حسابي</span>
+    </button>
+  </nav>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>
