@@ -1,4 +1,4 @@
-/* Suli Anime v1.2 — D1 «القرية اليابانية» visual language (from the v5 designs).
+/* Suli Anime v1.3 — D1 «القرية اليابانية» visual language (from the v5 designs).
    Mobile-first: the app fills the phone screen, capped at 780px on desktop. */
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%}
@@ -260,3 +260,18 @@ input[type=range].slider::-moz-range-thumb{width:22px;height:22px;border-radius:
 .frow-btn.danger{color:#C0392B;border-color:#F0C4BE;background:#FFF5F3}
 .fempty{background:#FFFFFF;border:1px dashed #E0D2B4;border-radius:14px;
   padding:18px 14px;text-align:center;font-size:13px;color:#8A7A6B;line-height:1.8}
+
+/* ---------- v1.3: profile edit form ---------- */
+.field{margin-top:14px}
+.field label{display:flex;justify-content:space-between;align-items:center;
+  font-size:13px;font-weight:800;margin-bottom:7px}
+.field .counter{font-size:11px;font-weight:700;color:#8A7A6B}
+.field input[type=text],.field textarea{width:100%;border:1.5px solid #EADFC6;
+  border-radius:12px;padding:11px 13px;font:inherit;font-size:14px;
+  background:#FFFFFF;color:#3E2C22;outline:none;resize:vertical}
+.field input[type=text]:focus,.field textarea:focus{border-color:#D96C8A}
+.chip-inputs{display:flex;gap:8px}
+.chip-inputs input{flex:1;min-width:0;border:1.5px solid #EADFC6;border-radius:12px;
+  padding:10px 8px;font:inherit;font-size:13px;background:#FFFFFF;color:#3E2C22;
+  outline:none;text-align:center}
+.chip-inputs input:focus{border-color:#D96C8A}
