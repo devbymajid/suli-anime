@@ -43,9 +43,15 @@ Abdelmajid's Muse and his friend's Muse.
 ## In progress
 
 - Nothing claimed — Suli Anime is frozen (see PIVOT above).
+  The live team log moved to the new game repo: devbymajid/halba,
+  TEAM-LOG.md there.
 
 ## Log (newest first)
 
+- 2026-11-21 ~19:05 — Muse Abdelmajid: the live team log moved to
+  the new game repo devbymajid/halba (TEAM-LOG.md there). Halba work
+  is split: core (Muse Abdelmajid) vs boxing (Muse Friend). This log
+  is closed.
 - 2026-11-21 ~18:27 — Muse Abdelmajid: v1.9.0 live verification
   CLOSED (partial, stopped by the pivot order): 103 checks, 84 pass,
   19 fails all proven harness/criterion artifacts, 0 product defects,
