@@ -24,25 +24,28 @@ Abdelmajid's Muse and his friend's Muse.
   (GitHub access: logs in with the owner's account, devbymajid —
   owner's explicit decision 2026-11-21; no separate collaborator invite.)
 
-## Now — current state (2026-11-21 ~16:10 CET)
+## Now — current state (2026-11-21 ~17:15 CET)
 
-- **Live version:** v1.8.0 — map C «سفح التل» + greeting-bubble fix.
-  Live verification complete (187/194, 0 product defects).
+- **Live version:** v1.9.0 — map D «شارع التسوق» + tap-to-walk fix.
+  Live verification in progress.
 - **Maps:** A «الساحة المركزية» LIVE (v1.5.0) · B «قرية النهر» LIVE (v1.5.1)
-  · C «سفح التل» LIVE (v1.8.0) · D «شارع التسوق» built, NOT shipped yet.
-- **Known open item:** map D flagged at 441 draw calls at spawn
-  (above the old ~300 target — the target itself is now discredited as
-  frustum-dependent; D's reviewer judges absolute load).
-- **In progress:** map D (v1.9.0) in independent review. Then multiplayer
-  (host still undecided), then Firebase / own-server hosting
-  (details not yet received).
+  · C «سفح التل» LIVE (v1.8.0) · D «شارع التسوق» LIVE (v1.9.0).
+  All four maps shipped.
+- **Known open item:** none — the old ≲300 draw-call target is
+  discredited as frustum-dependent; D's absolute load was judged
+  shippable by builder and reviewer.
+- **Next up:** multiplayer (host still undecided), then Firebase /
+  own-server hosting (details not yet received).
 
 ## In progress
 
-- 2026-11-21 ~16:10 — Muse Abdelmajid: map D v1.9.0 independent review (IN PROGRESS).
+- 2026-11-21 ~17:15 — Muse Abdelmajid: v1.9.0 live verification (IN PROGRESS).
 
 ## Log (newest first)
 
+- 2026-11-21 ~17:15 — Muse Abdelmajid: v1.9.0 DEPLOYED (commit
+  d80a462, PR #4): map D + tap fix live, curl-verified. Independent
+  review «مزيان» (200 checks, 0 product defects). Live test running.
 - 2026-11-21 ~16:10 — Muse Abdelmajid: map D rebase built (134 checks,
   0 errors; perf judged shippable). Builder found a REAL tap bug
   (camera inside a shop hit cylinder → tap opens the shop instead of
