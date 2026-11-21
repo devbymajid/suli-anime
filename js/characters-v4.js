@@ -127,12 +127,22 @@ function buildHair(g, spec, headY) {
     g.add(b);
   });
   if (spec.hairStyle === 'spiky') {
-    // messy spiky top: short thick cones sweeping up/forward from the dome
+    // messy spiky top: short thick cones sweeping up/forward from the dome.
+    // v1.7 fix: spike/streak heights are RELATIVE to headY. They used to
+    // be absolute (1.55, 1.47, ...), which was only correct when buildHair
+    // ran on the root group with headY=1.39 (static NPCs). The articulated
+    // builders call buildHair on a flipped subgroup inside the head pivot
+    // (headY=0.11, world 1.39), so the absolute values landed at world
+    // y≈2.83 — doubling fitHeight's bounding box and shrinking yusuf to
+    // half size, with his spikes floating ~0.6 above his head (found by
+    // pixel-measuring the v1.7 calibration screenshot: 93px figure vs
+    // 214px projected). Relative values give identical results for the
+    // static caller (1.39+0.16=1.55) and correct ones for the articulated.
     const spikes = [
-      [0, 1.55, 0.01, 0.1, 1, 0.25, 0.11, 0.048], [0.05, 1.545, 0.02, 0.5, 1, 0.3, 0.10, 0.044],
-      [-0.05, 1.545, 0.02, -0.5, 1, 0.3, 0.10, 0.044], [0, 1.545, -0.05, 0, 1, -0.55, 0.10, 0.044],
-      [0.08, 1.515, -0.02, 0.85, 0.7, -0.15, 0.09, 0.040], [-0.08, 1.515, -0.02, -0.85, 0.7, -0.15, 0.09, 0.040],
-      [0.03, 1.54, 0.06, 0.3, 1, 0.6, 0.09, 0.038], [-0.03, 1.54, 0.06, -0.3, 1, 0.6, 0.09, 0.038],
+      [0, headY + 0.16, 0.01, 0.1, 1, 0.25, 0.11, 0.048], [0.05, headY + 0.155, 0.02, 0.5, 1, 0.3, 0.10, 0.044],
+      [-0.05, headY + 0.155, 0.02, -0.5, 1, 0.3, 0.10, 0.044], [0, headY + 0.155, -0.05, 0, 1, -0.55, 0.10, 0.044],
+      [0.08, headY + 0.125, -0.02, 0.85, 0.7, -0.15, 0.09, 0.040], [-0.08, headY + 0.125, -0.02, -0.85, 0.7, -0.15, 0.09, 0.040],
+      [0.03, headY + 0.15, 0.06, 0.3, 1, 0.6, 0.09, 0.038], [-0.03, headY + 0.15, 0.06, -0.3, 1, 0.6, 0.09, 0.038],
     ];
     spikes.forEach(function (s) { g.add(spike(s[7], s[6], hairM, s[0], s[1], s[2], s[3], s[4], s[5], 0.55)); });
     // short back hair
@@ -141,14 +151,14 @@ function buildHair(g, spec, headY) {
     // coloured streaks: thin strands over the hair
     const streakM = mat(spec.streak);
     const streaks = [
-      [0.075, 1.47, 0.07, 0.35, -0.9, 0.25], [-0.075, 1.47, 0.07, -0.35, -0.9, 0.25],
-      [0.10, 1.44, 0.02, 0.55, -0.8, 0.1], [-0.10, 1.44, 0.02, -0.55, -0.8, 0.1],
+      [0.075, headY + 0.08, 0.07, 0.35, -0.9, 0.25], [-0.075, headY + 0.08, 0.07, -0.35, -0.9, 0.25],
+      [0.10, headY + 0.05, 0.02, 0.55, -0.8, 0.1], [-0.10, headY + 0.05, 0.02, -0.55, -0.8, 0.1],
     ];
     streaks.forEach(function (s) { g.add(spike(0.011, 0.15, streakM, s[0], s[1], s[2], s[3], s[4], s[5], 0.35)); });
     if (spec.streak2) {
       const m2 = mat(spec.streak2);
-      g.add(spike(0.010, 0.13, m2, 0.04, 1.50, 0.075, 0.2, -0.9, 0.35, 0.35));
-      g.add(spike(0.010, 0.13, m2, -0.05, 1.49, 0.07, -0.25, -0.9, 0.3, 0.35));
+      g.add(spike(0.010, 0.13, m2, 0.04, headY + 0.11, 0.075, 0.2, -0.9, 0.35, 0.35));
+      g.add(spike(0.010, 0.13, m2, -0.05, headY + 0.10, 0.07, -0.25, -0.9, 0.3, 0.35));
     }
   } else {
     // shoulder-length: back mass + side locks
@@ -467,4 +477,179 @@ function tintArticulated(model, app) {
   }
 }
 
-export { buildCharacter, fitHeight, SPECS, buildArticulatedFemale, tintArticulated };
+// ================= v1.7: ARTICULATED NPC CHARACTERS =================
+// Same idea as buildArticulatedFemale, but per-NPC: the village NPCs
+// (sara/yusuf/layan) become LIVING characters that wander the map, driven
+// by the same Player walk class as the player (player.js, untouched).
+// The skeleton mirrors buildArticulatedFemale exactly (same J_Bip_* pivot
+// names, same heights, same -Z facing), so the v1.1 stride-matched gait
+// works on it unchanged; only the outfit branches differ (tee / skirt /
+// hoodie / suit, per the NPC's spec). Every mesh position is the
+// buildBody world coordinate re-expressed in its pivot's local frame,
+// with the Z sign flipped (front = -Z here, +Z in buildCharacter).
+// Visual match with buildCharacter: same face/hair builders (inside the
+// flipped head subgroup), same torso/limb sizes, same outfit details
+// (skirt cone + backpack + cat for sara, tee stripes for yusuf, hood +
+// thigh-high socks for layan). One known micro-difference: at peak hip
+// swing the thigh pokes ~8mm past Sara's skirt hem for a frame or two —
+// invisible at NPC scale on a phone (see NOTES.md).
+function buildArticulatedCharacter(key, app) {
+  const spec = Object.assign({}, SPECS[key]);
+  if (!spec || !SPECS[key]) throw new Error('unknown character ' + key);
+  if (app) {
+    if (app.haircolor) spec.hair = app.haircolor;
+    if (app.eyecolor) spec.eye = app.eyecolor;
+    if (app.outfitcolor) spec.outfitColor = app.outfitcolor;
+    if (app.skin) spec.skin = app.skin;
+  }
+  if (spec.skin === undefined) spec.skin = SKIN;
+  const g = new THREE.Group();
+  const skinM = mat(spec.skin);
+  const outfitM = mat(spec.outfitColor);
+  const pantsM = mat(spec.pants);
+  const shoesM = mat(spec.shoes);
+  const tag = (m, part) => { m.userData.part = part; return m; };
+  function pivot(parent, name, x, y, z) {
+    const p = new THREE.Group();
+    p.name = name;
+    p.position.set(x, y, z);
+    parent.add(p);
+    return p;
+  }
+  const torsoR = spec.gender === 'f' ? 0.098 : 0.105;
+  const sleeveLong = spec.outfit === 'suit' || spec.outfit === 'hoodie';
+  const armR = spec.outfit === 'hoodie' ? 0.036 : 0.031;
+
+  // ---- hips (root; legs + spine hang from it) ----
+  const hips = pivot(g, 'J_Bip_C_Hips', 0, 0.80, 0);
+  const hipM = spec.outfit === 'skirt' ? mat(0x5b7fa6) : outfitM;
+  const hip = tag(mesh(new THREE.SphereGeometry(0.09, 16, 12), hipM, 0, 0, 0), 'outfit');
+  hip.scale.set(1.25, 0.75, 0.9); hips.add(hip);
+  if (spec.outfit === 'skirt') {
+    // plaid pleated skirt (static on the hips — the swinging thighs stay
+    // inside it except for an ~8mm poke at peak swing; see the header note)
+    const skirtM = new THREE.MeshLambertMaterial({ map: plaidTexture(), color: spec.outfitColor });
+    hips.add(mesh(new THREE.CylinderGeometry(0.092, 0.155, 0.24, 24, 1, true), skirtM, 0, -0.10, 0));
+    const wb = mesh(new THREE.TorusGeometry(0.092, 0.012, 8, 24), mat(0x5b7fa6), 0, 0.015, 0);
+    wb.rotation.x = Math.PI / 2; hips.add(wb);
+  }
+
+  // ---- spine chain ----
+  const spine = pivot(hips, 'J_Bip_C_Spine', 0, 0.12, 0);       // y 0.92
+  const tH = spec.outfit === 'hoodie' ? 0.44 : 0.38;
+  const tY = spec.outfit === 'hoodie' ? 0.99 : 1.00;
+  const tR = spec.outfit === 'hoodie' ? 0.115 : torsoR;
+  spine.add(tag(mesh(new THREE.CylinderGeometry(tR, spec.outfit === 'hoodie' ? 0.115 : torsoR - 0.017, tH, 18), outfitM, 0, tY - 0.92, 0), 'outfit'));
+  if (spec.outfit === 'tee') {
+    [-1, 1].forEach(function (s) {
+      const st = mesh(new THREE.BoxGeometry(0.012, 0.30, 0.01), mat(0x2dd4bf), s * 0.093, 0.08, -0.03);
+      st.rotation.y = s * 0.6; spine.add(st); // side stripes (z-flipped)
+    });
+  }
+  if (spec.outfit === 'hoodie') {
+    spine.add(mesh(new THREE.BoxGeometry(0.13, 0.10, 0.015), mat(0x23262f), 0, -0.06, -0.108)); // kangaroo pocket (front = -Z)
+  }
+  const chest = pivot(spine, 'J_Bip_C_Chest', 0, 0.10, 0);      // y 1.02
+  if (spec.outfit === 'skirt') {
+    // purple backpack (back = +Z here)
+    const bpM = mat(0x8b7bb8);
+    chest.add(mesh(new THREE.BoxGeometry(0.17, 0.21, 0.07), bpM, 0, 0, 0.115));
+    chest.add(mesh(new THREE.BoxGeometry(0.11, 0.09, 0.03), mat(0x7a68a8), 0, -0.03, 0.155));
+  }
+  const upper = pivot(chest, 'J_Bip_C_UpperChest', 0, 0.10, 0); // y 1.12
+  const sh = tag(mesh(new THREE.SphereGeometry(0.10, 16, 12), outfitM, 0, 0.05, 0), 'outfit');
+  sh.scale.set(spec.outfit === 'hoodie' ? 1.45 : 1.35, 0.62, 0.95); upper.add(sh);
+  upper.add(tag(mesh(new THREE.CylinderGeometry(0.034, 0.036, 0.09, 12), skinM, 0, 0.12, 0), 'skin')); // neck
+  if (spec.outfit === 'hoodie') {
+    const hood = tag(mesh(new THREE.SphereGeometry(0.095, 16, 12), outfitM, 0, 0.14, 0.055), 'outfit');
+    hood.scale.set(1.15, 0.85, 0.8); upper.add(hood); // hood behind the neck (back = +Z)
+    [-1, 1].forEach(function (s) { // drawstrings (front = -Z)
+      upper.add(mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.09, 6), mat(0xd8d8d8), s * 0.025, 0.01, -0.115));
+      upper.add(mesh(new THREE.SphereGeometry(0.006, 8, 6), mat(0xd8d8d8), s * 0.025, -0.035, -0.115));
+    });
+  }
+  if (spec.outfit === 'skirt') {
+    [-1, 1].forEach(function (s) { // backpack straps
+      const strap = mesh(new THREE.BoxGeometry(0.03, 0.16, 0.012), mat(0x6e5a9e), s * 0.06, -0.02, 0.095);
+      strap.rotation.x = -0.15; upper.add(strap);
+    });
+    // tiny black cat on the tee (flat shapes face -Z here)
+    const catM = mat(0x1a1a1a);
+    const cat = mesh(new THREE.CircleGeometry(0.011, 12), catM, 0.03, -0.02, -0.103);
+    cat.rotation.y = Math.PI; upper.add(cat);
+    upper.add(mesh(new THREE.ConeGeometry(0.004, 0.008, 4), catM, 0.022, -0.007, -0.103));
+    upper.add(mesh(new THREE.ConeGeometry(0.004, 0.008, 4), catM, 0.038, -0.007, -0.103));
+  }
+  if (spec.outfit === 'tee') {
+    const dg = mesh(new THREE.BoxGeometry(0.10, 0.015, 0.006), mat(0x7dd956), 0.02, -0.02, -0.102);
+    dg.rotation.z = 0.5; upper.add(dg); // green diagonal accent
+  }
+  if (spec.outfit === 'suit') {
+    // white shirt V + collar + teal tie (flat shapes face -Z here)
+    const tri = new THREE.Shape();
+    tri.moveTo(-0.045, 0.06); tri.lineTo(0.045, 0.06); tri.lineTo(0, -0.09); tri.closePath();
+    const shirt = mesh(new THREE.ShapeGeometry(tri), mat(0xf8f8f8), 0, 0.01, -0.104);
+    shirt.rotation.y = Math.PI; upper.add(shirt);
+    [-1, 1].forEach(function (s) {
+      const c = mesh(new THREE.BoxGeometry(0.032, 0.02, 0.006), mat(0xf8f8f8), s * 0.036, 0.055, -0.105);
+      c.rotation.z = s * -0.5; upper.add(c);
+    });
+    upper.add(mesh(new THREE.BoxGeometry(0.026, 0.15, 0.008), mat(spec.tie), 0, -0.07, -0.107));
+    upper.add(mesh(new THREE.BoxGeometry(0.03, 0.032, 0.012), mat(spec.tie), 0, 0.025, -0.106));
+  }
+
+  // ---- head: the SAME face/hair builders as the static NPCs, inside a
+  // flipped subgroup so the face looks -Z like the VRM (as in
+  // buildArticulatedFemale).
+  const headP = pivot(upper, 'J_Bip_C_Head', 0, 0.16, 0); // y 1.28
+  const flip = new THREE.Group();
+  flip.rotation.y = Math.PI;
+  headP.add(flip);
+  buildFace(flip, spec, 0.11); // head centre at world y 1.39
+  buildHair(flip, spec, 0.11);
+
+  // ---- arms: shoulder pivots on the upper chest, elbow pivots below ----
+  [-1, 1].forEach(function (s) {
+    const side = s < 0 ? 'L' : 'R';
+    const upperArm = pivot(upper, 'J_Bip_' + side + '_UpperArm', s * 0.148, 0.05, 0);
+    upperArm.rotation.z = s * 0.10; // slight outward angle (rest pose)
+    upperArm.add(tag(mesh(new THREE.CylinderGeometry(armR, armR - 0.003, 0.24, 10), outfitM, 0, -0.12, 0), 'outfit'));
+    const fore = pivot(upperArm, 'J_Bip_' + side + '_LowerArm', 0, -0.24, 0);
+    fore.rotation.x = 0.18; // forearm angles slightly forward (rest pose)
+    const foreM = sleeveLong ? outfitM : skinM;
+    fore.add(tag(mesh(new THREE.CylinderGeometry(0.027, 0.024, 0.22, 10), foreM, 0, -0.11, -0.01), sleeveLong ? 'outfit' : 'skin'));
+    fore.add(tag(mesh(new THREE.SphereGeometry(0.034, 12, 10), skinM, 0, -0.23, -0.02), 'skin'));
+  });
+
+  // ---- legs: hip pivots, knee pivots, ankle pivots, toe pivots ----
+  [-1, 1].forEach(function (s) {
+    const side = s < 0 ? 'L' : 'R';
+    const upperLeg = pivot(hips, 'J_Bip_' + side + '_UpperLeg', s * 0.055, 0, 0);
+    const thighM = (spec.outfit === 'skirt' || spec.outfit === 'hoodie') ? skinM : pantsM;
+    upperLeg.add(tag(mesh(new THREE.CylinderGeometry(0.046, 0.040, 0.34, 12), thighM, 0, -0.17, 0), thighM === skinM ? 'skin' : 'other'));
+    const lowerLeg = pivot(upperLeg, 'J_Bip_' + side + '_LowerLeg', 0, -0.34, 0);
+    const shinM = spec.outfit === 'skirt' ? skinM : (spec.outfit === 'hoodie' ? mat(0x374151) : pantsM);
+    lowerLeg.add(mesh(new THREE.CylinderGeometry(0.038, 0.033, 0.36, 12), shinM, 0, -0.18, 0));
+    if (spec.outfit === 'hoodie') { // thigh-high sock band
+      const band = mesh(new THREE.TorusGeometry(0.042, 0.008, 8, 18), mat(0xf4a7b9), 0, -0.04, 0);
+      band.rotation.x = Math.PI / 2; lowerLeg.add(band);
+    }
+    const foot = pivot(lowerLeg, 'J_Bip_' + side + '_Foot', 0, -0.36, 0);
+    if (spec.outfit === 'skirt') { // white ankle sock
+      foot.add(mesh(new THREE.CylinderGeometry(0.040, 0.036, 0.07, 12), mat(0xf5f5f5), 0, 0, 0));
+    }
+    foot.add(mesh(new THREE.BoxGeometry(0.075, 0.055, 0.17), shoesM, 0, -0.072, -0.025)); // shoe, toe toward -Z
+    const toe = pivot(foot, 'J_Bip_' + side + '_ToeBase', 0, -0.08, -0.08);
+    toe.add(mesh(new THREE.BoxGeometry(0.07, 0.04, 0.06), shoesM, 0, 0, -0.02));
+  });
+
+  g.userData.appliedAppearance = {
+    haircolor: '#' + new THREE.Color(spec.hair).getHexString(),
+    skin: '#' + new THREE.Color(spec.skin).getHexString(),
+    eyecolor: '#' + new THREE.Color(spec.eye).getHexString(),
+    outfitcolor: '#' + new THREE.Color(spec.outfitColor).getHexString(),
+  };
+  return g;
+}
+
+export { buildCharacter, fitHeight, SPECS, buildArticulatedFemale, tintArticulated, buildArticulatedCharacter };

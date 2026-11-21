@@ -173,6 +173,28 @@ const accountStore = {
   endSession() { try { localStorage.removeItem(SESSION_KEY); } catch (e) {} },
   // for tests + the account screen: is this device logged in right now?
   isLoggedIn() { return !!this.session(); },
+  // v1.7: DELETE ACCOUNT (local) — removes EVERY suli-* key from
+  // localStorage: the account itself, the session, coins, daily bonus,
+  // inventory, likes, friends, chats, appearance, profile overrides,
+  // character, quality, map choice, gift likes. After this + a reload
+  // the game is exactly as on first launch (signup screen).
+  // There is no backend yet, so this is the whole account. When the
+  // Firebase backend lands, the Firebase-backed adapter deletes the
+  // SERVER account first (Auth user + Firestore user doc) and then calls
+  // this local wipe — the account screen does not change.
+  // Returns the number of keys removed (for the delete sheet + tests).
+  wipeAllLocalData() {
+    const doomed = [];
+    try {
+      // collect first: removing while iterating shifts the indices
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.indexOf('suli-') === 0) doomed.push(k);
+      }
+      doomed.forEach((k) => localStorage.removeItem(k));
+    } catch (e) {}
+    return doomed.length;
+  },
 };
 
 export { accountStore, validateSignup, hashPassword, sha256HexSync, MIN_AGE, MAX_AGE, MIN_PASSWORD };
