@@ -1,4 +1,4 @@
-// Suli Anime v1.4 — SPA controller.
+// Suli Anime v1.5 — SPA controller.
 // One render loop runs at a time: switching screens stops the previous
 // screen's loop and starts the new one. 3D screens init lazily on first
 // visit (each loads the kaito VRM once; the browser cache makes later
@@ -12,12 +12,20 @@
 // v1.4 adds the detailed village: procedural machiya/shop/minka buildings,
 // torii gate, stone plaza/paths and props (env.js), plus circle colliders
 // resolved in the walk loop so the player cannot walk through buildings.
+// v1.5 adds switchable BIG MAPS (a data-driven registry of map modules —
+// map-a.js «الساحة المركزية» first; B/C/D join by import + one line) and
+// the SHOP ECONOMY (shopUI): coins with a daily bonus, an inventory, and
+// buy/sell/apply — plus gifts for NPCs (from the profile sheet) that raise
+// their like count. No player-to-player trading (needs multiplayer).
+// v1.5.0 ships map A only; the picker lists the maps in the registry.
 import * as THREE from 'three';
-import { loadVRM, poseVRM, fitVRM, baseRenderer, shadowDisc, buildCreatorEnv, buildVillageEnv, buildHomeEnv, storedQuality, setStoredQuality, resolveQuality } from './env.js';
+import { loadVRM, poseVRM, fitVRM, baseRenderer, shadowDisc, buildCreatorEnv, buildHomeEnv, storedQuality, setStoredQuality, resolveQuality } from './env.js';
 import { Player, FollowCamera, FixedCamera, createInput } from './player.js';
 import { buildCharacter, fitHeight } from './characters-v4.js';
 import { PROFILES, getProfile, saveProfileOverride, resetProfileOverride } from './profiles.js';
 import { getAppearance, getStoredAppearance, saveAppearance, diffAppearance, tintVRM } from './appearance.js';
+// v1.5: map modules — one import per shipped map (A only in 1.5.0).
+import { MAP as MAP_A } from './map-a.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -115,11 +123,33 @@ const homeScreen = (() => {
   };
 })();
 
+// ================= MAP REGISTRY (v1.5) =================
+// One entry per shipped map module. Adding a map later = import its module
+// above + one line in MAPS below; nothing else changes — the village screen
+// reads env/bounds/start/title from the selected entry, and the picker
+// (mapUI) renders MAPS as-is. The selection persists in localStorage
+// ('suli-map'); an unknown stored id falls back to the first map.
+const MAPS = [MAP_A];
+const MAP_KEY = 'suli-map';
+function selectedMapId() {
+  try {
+    const id = localStorage.getItem(MAP_KEY);
+    if (id && MAPS.some((m) => m.id === id)) return id;
+  } catch (e) {}
+  return MAPS[0].id;
+}
+function selectedMap() {
+  return MAPS.find((m) => m.id === selectedMapId()) || MAPS[0];
+}
+// The map for this session (fixed at load; switching saves + reloads).
+const ACTIVE_MAP = selectedMap();
+
 // ================= WALKABLE SCREEN factory (village + room) =================
 function makeWalkScreen(opts) {
   let ready = false, initPromise = null, hintHidden = false;
-  let renderer, scene, camera, player, camFollow, input, disc, loop = makeLoop();
+  let renderer, scene, camera, player, camFollow, input, disc, av, loop = makeLoop();
   let npcs = null; // v1.2: village NPC groups for tap-to-profile (room: none)
+  let shops = null; // v1.5: village shop groups for tap-to-shop (room: none)
   let colliders = null, envStats = null; // v1.4: village circle colliders + stats (room: none)
   let camManualYaw = null; // v1.4.1: drag-to-rotate — null = follow mode
   // (camera swings behind the player); once the user drags the camera, the
@@ -143,6 +173,22 @@ function makeWalkScreen(opts) {
     socialUI.openProfile(o.userData.npcKey);
     return true;
   }
+  // v1.5: raycast the SHOP groups for a tap (same pattern as pickNPC).
+  // On a hit, open that shop's sheet and return true so the tap does NOT
+  // also move the player. NPCs are tried first (see the input callback),
+  // so a tap that hits both an NPC and a shop opens the NPC profile.
+  function pickShop(nx, ny) {
+    if (!shops || !shops.length) return false;
+    npcRay.setFromCamera({ x: nx, y: ny }, camera);
+    const hits = npcRay.intersectObjects(shops.map((s) => s.group), true);
+    if (!hits.length) return false;
+    let o = hits[0].object;
+    while (o && !o.userData.shopId) o = o.parent;
+    if (!o) return false;
+    player.cancelTarget();
+    shopUI.openShop(o.userData.shopId);
+    return true;
+  }
   async function init() {
     if (ready) return;
     if (initPromise) return initPromise;
@@ -151,12 +197,12 @@ function makeWalkScreen(opts) {
       const w = vp.clientWidth, h = vp.clientHeight;
       renderer = baseRenderer(vp, w, h, false);
       scene = new THREE.Scene();
-      const envHandles = opts.env(scene) || {}; // village returns { npcs, colliders, stats }
+      const envHandles = opts.env(scene) || {}; // village returns { npcs, shops, colliders, stats }
       if (envHandles.npcs) npcs = envHandles.npcs;
+      if (envHandles.shops) shops = envHandles.shops; // v1.5: tappable shops
       if (envHandles.colliders) colliders = envHandles.colliders;
       if (envHandles.stats) envStats = envHandles.stats;
       camera = new THREE.PerspectiveCamera(opts.fov || 46, w / h, 0.1, 80);
-      let av;
       try {
         av = await loadVRM('dero.vrm');
       } catch (e) {
@@ -184,7 +230,9 @@ function makeWalkScreen(opts) {
       camFollow.snapTo(player);
       input = createInput($(opts.joy), $(opts.knob), renderer.domElement, camera,
         (pt) => player.setTarget(pt.x, pt.z),
-        npcs ? (nx, ny) => pickNPC(nx, ny) : undefined); // v1.2: NPC taps first
+        // v1.2: NPC taps first; v1.5: then shop taps — a tap that hits
+        // neither moves the player (player.js is untouched: one callback).
+        (npcs || shops) ? (nx, ny) => pickNPC(nx, ny) || pickShop(nx, ny) : undefined);
       // v1.4.1: drag-to-rotate the follow camera (village only — the room's
       // FixedCamera has no yaw). Dragging on empty canvas orbits the camera
       // around Kaito; the new angle persists until the next drag. A short
@@ -254,6 +302,11 @@ function makeWalkScreen(opts) {
             }
           }
         }
+        // v1.5: re-clamp after the collider push — a push near a bound can
+        // eject the player ~0.2 past the bound line (found by the map-B
+        // builder); Player.update clamps BEFORE the push, so clamp again.
+        player.position.x = Math.max(opts.bounds.minX, Math.min(opts.bounds.maxX, player.position.x));
+        player.position.z = Math.max(opts.bounds.minZ, Math.min(opts.bounds.maxZ, player.position.z));
         camFollow.update(dt, player);
         // v1.4.1: hold the user's chosen camera angle. FollowCamera.update
         // lerps yaw back toward the player's facing, so re-apply the manual
@@ -332,15 +385,38 @@ function makeWalkScreen(opts) {
         visible: v.z < 1 && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1,
       };
     },
+    // v1.5 test hook: project a SHOP to page pixels (same family as
+    // npcScreen), for automated tap-to-shop tests.
+    shopScreen(id) {
+      if (!ready || !shops) return null;
+      const s = shops.find((o) => o.id === id);
+      if (!s) return null;
+      const v = new THREE.Vector3();
+      s.group.getWorldPosition(v);
+      v.y = 1.2;
+      v.project(camera);
+      const r = renderer.domElement.getBoundingClientRect();
+      return {
+        x: r.left + (v.x + 1) / 2 * r.width,
+        y: r.top + (1 - v.y) / 2 * r.height,
+        visible: v.z < 1 && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1,
+      };
+    },
+    // v1.5: re-tint the player VRM with the SAVED appearance (after a shop
+    // theme is applied) so the new colors show without a reload.
+    applyAppearance() {
+      if (!ready || !av) return;
+      tintVRM(av, getStoredAppearance('kaito'));
+    },
   };
   return api;
 }
 
 const villageScreen = makeWalkScreen({
   name: 'village', vp: '#villageVp', load: '#villageLoad', joy: '#joyVillage', knob: '#knobVillage',
-  env: buildVillageEnv,
-  bounds: { minX: -6.5, maxX: 6.5, minZ: -6, maxZ: 6.5 },
-  start: { x: 0, z: 2.5, ry: 0 }, // facing -Z, down the path toward the houses
+  env: ACTIVE_MAP.buildEnv, // v1.5: env/bounds/start come from the selected map
+  bounds: ACTIVE_MAP.bounds,
+  start: ACTIVE_MAP.start,
   // v1.4.1: closer follow camera (was 4.6) — Kaito reads bigger and
   // sharper on the phone. Height unchanged (2.7), so the camera still
   // passes under the torii beams (y 2.95/3.42).
@@ -422,8 +498,39 @@ const creatorScreen = (() => {
   function currentColors() {
     return { haircolor: state.haircolor, skin: state.skin, eyecolor: state.eyecolor, outfitcolor: state.outfitcolor };
   }
+  // v1.5: shop themes the player OWNS appear as extra color dots in the
+  // creator (hair + outfit groups), so a bought theme can be picked here
+  // like any built-in color. Dots are rebuilt from the inventory every
+  // time (stale ones removed first); a theme whose color already has a
+  // built-in dot is skipped. The delegated [data-group] click handler
+  // picks these dots up automatically (no extra wiring).
+  function refreshShopDots() {
+    const inv = shopUI.inventory();
+    [['haircolor', 'hair'], ['outfitcolor', 'outfit']].forEach(function (pair) {
+      const name = pair[0], kind = pair[1];
+      const g = document.querySelector('[data-group="' + name + '"]');
+      if (!g) return;
+      g.querySelectorAll('.dot[data-shop]').forEach((d) => d.remove());
+      Object.keys(inv).forEach(function (id) {
+        const it = shopUI.ITEMS[id];
+        if (!it || it.kind !== kind || inv[id] < 1) return;
+        if (g.querySelector('.dot[data-v="' + it.color + '"]')) return;
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        dot.dataset.v = it.color;
+        dot.dataset.shop = id;
+        dot.style.background = it.color;
+        dot.title = it.name;
+        g.appendChild(dot);
+      });
+      // re-mark the 'on' dot for the CURRENT state color (a shop color may
+      // now have a dot that the saved-state sync below does not know about)
+      g.querySelectorAll('.dot').forEach((o) => o.classList.toggle('on', o.dataset.v === String(state[name])));
+    });
+  }
   // v1.3: load a character's SAVED colors into the creator state + dots.
   function syncCreatorColors(key) {
+    refreshShopDots(); // v1.5: owned themes first, so their dots can be 'on'
     const app = getAppearance(key);
     state.haircolor = app.haircolor;
     state.skin = app.skin;
@@ -645,6 +752,7 @@ const creatorScreen = (() => {
     init,
     start() {
       if (!ready) return;
+      refreshShopDots(); // v1.5: a theme bought since the last visit shows up
       loop.start((dt) => {
         if (group) { spin += dt * 0.3; group.rotation.y = spin; }
         renderer.render(scene, camera);
@@ -687,6 +795,220 @@ const creatorScreen = (() => {
   };
 })();
 
+// ================= SHOPS + ECONOMY (v1.5) =================
+// All local (localStorage) — no backend, no multiplayer yet. The shops are
+// NPC vendors: the player buys from them and sells back to them at half
+// price. Player-to-player trading needs multiplayer and is NOT in this
+// version (the shops are the economy until multiplayer lands).
+//   suli-coins: number (starting balance 500)
+//   suli-last-daily: 'YYYY-MM-DD' of the last daily bonus (+100/day)
+//   suli-inventory: { itemId: count } (themes: 0/1, gifts: any count)
+//   suli-gift-likes: { npcKey: count } — likes earned by gifting
+const shopUI = (() => {
+  const COINS_KEY = 'suli-coins';
+  const DAILY_KEY = 'suli-last-daily';
+  const INV_KEY = 'suli-inventory';
+  const GIFT_LIKES_KEY = 'suli-gift-likes';
+  const START_COINS = 500;
+  const DAILY_BONUS = 100;
+  // Catalog: 4 shops x 3-4 items. Themes are EXCLUSIVE colors (not among
+  // the creator's built-in dots) so buying them unlocks something new.
+  // kind: 'outfit' | 'hair' (theme, applies to kaito) | 'gift' (consumable).
+  // gift.fav: the NPC who loves it (+2 likes instead of +1).
+  const ITEMS = {
+    'theme-gold':   { id: 'theme-gold',   name: 'هودي ذهبي ملكي',    desc: 'لون زي ذهبي حصري',       price: 300, kind: 'outfit', color: '#d4af37', shop: 'fashion' },
+    'theme-violet': { id: 'theme-violet', name: 'هودي بنفسجي الليل', desc: 'لون زي بنفسجي حصري',     price: 220, kind: 'outfit', color: '#8b5cf6', shop: 'fashion' },
+    'theme-teal':   { id: 'theme-teal',   name: 'هودي فيروزي النهر',  desc: 'لون زي فيروزي حصري',     price: 200, kind: 'outfit', color: '#14b8a6', shop: 'fashion' },
+    'hair-gold':    { id: 'hair-gold',    name: 'شعر ذهبي',          desc: 'لون شعر ذهبي حصري',     price: 250, kind: 'hair',   color: '#d4af37', shop: 'colors' },
+    'hair-violet':  { id: 'hair-violet',  name: 'شعر بنفسجي',        desc: 'لون شعر بنفسجي حصري',   price: 180, kind: 'hair',   color: '#8b5cf6', shop: 'colors' },
+    'hair-teal':    { id: 'hair-teal',    name: 'شعر فيروزي',        desc: 'لون شعر فيروزي حصري',   price: 180, kind: 'hair',   color: '#14b8a6', shop: 'colors' },
+    'gift-cake':    { id: 'gift-cake',    name: 'كعكة فراولة',       desc: 'هدية — المفضلة لدى سارة', price: 80,  kind: 'gift', color: '#f472b6', fav: 'sara',  shop: 'gifts' },
+    'gift-ball':    { id: 'gift-ball',    name: 'كرة قدم',           desc: 'هدية — المفضل لدى يوسف', price: 120, kind: 'gift', color: '#5e9a6a', fav: 'yusuf', shop: 'gifts' },
+    'gift-brush':   { id: 'gift-brush',   name: 'فرشاة رسم',         desc: 'هدية — المفضلة لدى ليان', price: 100, kind: 'gift', color: '#8b7bb8', fav: 'layan', shop: 'gifts' },
+    'gift-bouquet': { id: 'gift-bouquet', name: 'باقة ساكورا',       desc: 'هدية تناسب الجميع',       price: 60,  kind: 'gift', color: '#f2a0c0', fav: null,    shop: 'gifts' },
+    'gift-apple':   { id: 'gift-apple',   name: 'تفاح الجبل',        desc: 'هدية من بساتين القرية',   price: 40,  kind: 'gift', color: '#c0392b', fav: null,    shop: 'farm' },
+    'gift-honey':   { id: 'gift-honey',   name: 'عسل القرية',        desc: 'هدية حلوة من المنحل',     price: 50,  kind: 'gift', color: '#e8a33d', fav: null,    shop: 'farm' },
+    'gift-tea':     { id: 'gift-tea',     name: 'شاي الأعشاب',       desc: 'هدية دافئة ومهدئة',       price: 45,  kind: 'gift', color: '#5e9a6a', fav: null,    shop: 'farm' },
+    'gift-candy':   { id: 'gift-candy',   name: 'حلوى ساكورا',       desc: 'هدية صغيرة ولذيذة',       price: 30,  kind: 'gift', color: '#f8b8d0', fav: null,    shop: 'farm' },
+  };
+  const SHOPS = {
+    fashion: { id: 'fashion', name: 'متجر الأزياء', desc: 'ألوان أزياء حصرية — اشترِها وطبّقها على كايتو، أو اخترها لاحقاً من المنشئ.', items: ['theme-gold', 'theme-violet', 'theme-teal'] },
+    colors:  { id: 'colors',  name: 'متجر الألوان', desc: 'ألوان شعر حصرية لا توجد في المنشئ — اشترِها وطبّقها أو اخترها من المنشئ.', items: ['hair-gold', 'hair-violet', 'hair-teal'] },
+    gifts:   { id: 'gifts',   name: 'متجر الهدايا', desc: 'هدايا لسكان القرية — أهدِها من بروفايل الشخصية ليرتفع إعجابها بك.', items: ['gift-cake', 'gift-ball', 'gift-brush', 'gift-bouquet'] },
+    farm:    { id: 'farm',    name: 'سوق المزارع',  desc: 'من منتجات القرية: فواكه وعسل وشاي — كلها هدايا مناسبة لأي شخصية.', items: ['gift-apple', 'gift-honey', 'gift-tea', 'gift-candy'] },
+  };
+
+  function loadJSON(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch (e) { return fallback; }
+  }
+  function saveJSON(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // ---- coins + inventory ----
+  function coins() {
+    const v = loadJSON(COINS_KEY, null);
+    return (typeof v === 'number' && v >= 0) ? Math.floor(v) : START_COINS;
+  }
+  function setCoins(v) {
+    saveJSON(COINS_KEY, Math.max(0, Math.floor(v)));
+    renderCoins();
+  }
+  function inventory() {
+    const v = loadJSON(INV_KEY, {});
+    return (v && typeof v === 'object') ? v : {};
+  }
+  function renderCoins() {
+    const txt = coins().toLocaleString('en-US') + ' عملة';
+    const top = $('#topCoins');
+    if (top) top.textContent = txt;
+    const acc = $('#accCoins');
+    if (acc) acc.textContent = coins().toLocaleString('en-US');
+  }
+  function dailyBonus() {
+    const today = new Date().toISOString().slice(0, 10);
+    if (loadJSON(DAILY_KEY, '') === today) return;
+    saveJSON(DAILY_KEY, today);
+    setCoins(coins() + DAILY_BONUS);
+    toast('مكافأة يومية: +' + DAILY_BONUS + ' عملة');
+  }
+
+  // ---- shop sheet (same scrim-guard pattern as the profile sheet) ----
+  let currentShop = null;
+  let shopOpenedAt = 0;
+  const GIFT_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4"/><path d="M5 12v8h14v-8"/><path d="M12 8v12"/><path d="M12 8s-4 0-4-2.5S12 3 12 8zM12 8s4 0 4-2.5S12 3 12 8z"/></svg>';
+  function renderShop(id) {
+    const shop = SHOPS[id];
+    if (!shop) return;
+    $('#shopName').textContent = shop.name;
+    $('#shopDesc').textContent = shop.desc;
+    $('#shopCoins').textContent = coins().toLocaleString('en-US') + ' عملة';
+    const inv = inventory();
+    $('#shopItems').innerHTML = shop.items.map((itemId) => {
+      const it = ITEMS[itemId];
+      const owned = inv[itemId] || 0;
+      const isTheme = it.kind === 'outfit' || it.kind === 'hair';
+      let actions = '';
+      if (isTheme && owned) {
+        actions = '<button class="shop-btn" data-apply="' + it.id + '">تطبيق</button>'
+          + '<button class="shop-btn sell" data-sell="' + it.id + '">بيع +' + Math.floor(it.price / 2) + '</button>';
+      } else {
+        actions = '<button class="shop-btn" data-buy="' + it.id + '">شراء</button>';
+        if (owned) actions += '<button class="shop-btn sell" data-sell="' + it.id + '">بيع +' + Math.floor(it.price / 2) + '</button>';
+      }
+      const ownedTag = owned ? '<span class="shop-owned">' + (isTheme ? 'مملوك ✓' : 'تملك: ' + owned) + '</span>' : '';
+      return '<div class="shop-item">'
+        + '<span class="shop-sw" style="background:' + it.color + '">' + (it.kind === 'gift' ? GIFT_SVG : '') + '</span>'
+        + '<div class="shop-id"><b>' + escapeHtml(it.name) + '</b><span>' + escapeHtml(it.desc) + '</span>' + ownedTag + '</div>'
+        + '<div class="shop-buy"><span class="shop-price">' + it.price + ' عملة</span>' + actions + '</div>'
+        + '</div>';
+    }).join('');
+  }
+  function openShop(id) {
+    if (!SHOPS[id]) return;
+    currentShop = id;
+    shopOpenedAt = Date.now();
+    renderShop(id);
+    $('#shopScrim').classList.add('show');
+    $('#shopSheet').classList.add('show');
+  }
+  function shopJustOpened() { return Date.now() - shopOpenedAt < 400; }
+  function closeShop() {
+    currentShop = null;
+    $('#shopScrim').classList.remove('show');
+    $('#shopSheet').classList.remove('show');
+  }
+
+  // ---- buy / sell / apply ----
+  function buy(itemId) {
+    const it = ITEMS[itemId];
+    if (!it) return;
+    const inv = inventory();
+    if ((it.kind === 'outfit' || it.kind === 'hair') && inv[itemId]) { toast('تملك هذا اللون بالفعل'); return; }
+    if (coins() < it.price) { toast('عملاتك لا تكفي'); return; }
+    setCoins(coins() - it.price);
+    inv[itemId] = (inv[itemId] || 0) + 1;
+    saveJSON(INV_KEY, inv);
+    renderShop(currentShop);
+    toast('تم شراء ' + it.name);
+  }
+  function sell(itemId) {
+    const it = ITEMS[itemId];
+    if (!it) return;
+    const inv = inventory();
+    if (!inv[itemId]) return;
+    const refund = Math.floor(it.price / 2);
+    inv[itemId]--;
+    if (!inv[itemId]) delete inv[itemId];
+    saveJSON(INV_KEY, inv);
+    setCoins(coins() + refund);
+    renderShop(currentShop);
+    toast('بعت ' + it.name + ' بـ ' + refund + ' عملة');
+  }
+  function applyTheme(itemId) {
+    const it = ITEMS[itemId];
+    if (!it || (it.kind !== 'outfit' && it.kind !== 'hair')) return;
+    if (!inventory()[itemId]) { toast('اشترِ هذا اللون أولاً'); return; }
+    const field = it.kind === 'hair' ? 'haircolor' : 'outfitcolor';
+    const patch = {};
+    patch[field] = it.color;
+    saveAppearance('kaito', Object.assign({}, getAppearance('kaito'), patch));
+    villageScreen.applyAppearance();
+    roomScreen.applyAppearance();
+    renderShop(currentShop);
+    toast('تم تطبيق ' + it.name + ' على كايتو');
+  }
+
+  // ---- gifts (given from the NPC profile sheet) ----
+  function ownedGifts() {
+    const inv = inventory();
+    return Object.keys(inv)
+      .filter((id) => ITEMS[id] && ITEMS[id].kind === 'gift' && inv[id] > 0)
+      .map((id) => ({ item: ITEMS[id], count: inv[id] }));
+  }
+  function giftLikeCount(key) {
+    const all = loadJSON(GIFT_LIKES_KEY, {});
+    return all[key] || 0;
+  }
+  // Consumes one gift; returns the likes earned (2 for a favorite, else 1).
+  function giveGift(npcKey, itemId) {
+    const it = ITEMS[itemId];
+    if (!it || it.kind !== 'gift') return 0;
+    const inv = inventory();
+    if (!inv[itemId]) return 0;
+    inv[itemId]--;
+    if (!inv[itemId]) delete inv[itemId];
+    saveJSON(INV_KEY, inv);
+    const pts = it.fav === npcKey ? 2 : 1;
+    const all = loadJSON(GIFT_LIKES_KEY, {});
+    all[npcKey] = (all[npcKey] || 0) + pts;
+    saveJSON(GIFT_LIKES_KEY, all);
+    return pts;
+  }
+
+  function wire() {
+    $('#shopClose').addEventListener('click', () => { if (!shopJustOpened()) closeShop(); });
+    $('#shopScrim').addEventListener('click', () => { if (!shopJustOpened()) closeShop(); });
+    $('#shopItems').addEventListener('click', (e) => {
+      const buyBtn = e.target.closest('[data-buy]');
+      if (buyBtn) { buy(buyBtn.dataset.buy); return; }
+      const sellBtn = e.target.closest('[data-sell]');
+      if (sellBtn) { sell(sellBtn.dataset.sell); return; }
+      const applyBtn = e.target.closest('[data-apply]');
+      if (applyBtn) { applyTheme(applyBtn.dataset.apply); return; }
+    });
+    renderCoins();
+  }
+
+  return { wire, openShop, closeShop, coins, inventory, giftLikeCount, giveGift, ownedGifts, dailyBonus, renderCoins, ITEMS, SHOPS };
+})();
+
 // ================= SOCIAL: profiles, likes, friends, chat (v1.2) =================
 // All local (localStorage) — no backend, no multiplayer yet. Chats are
 // scripted replies from the village characters, NOT real players: nothing
@@ -714,7 +1036,7 @@ const socialUI = (() => {
   const likes = () => loadJSON('suli-likes', {});     // { key: true }
   const friends = () => loadJSON('suli-friends', []); // [key]
   const chats = () => loadJSON('suli-chats', {});     // { key: [{from, text}] }
-  const likeCount = (key) => PROFILES[key].baseLikes + (likes()[key] ? 1 : 0);
+  const likeCount = (key) => PROFILES[key].baseLikes + (likes()[key] ? 1 : 0) + shopUI.giftLikeCount(key); // v1.5: + gift likes
   const isFriend = (key) => friends().indexOf(key) !== -1;
   function escapeHtml(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -738,7 +1060,28 @@ const socialUI = (() => {
     const frBtn = $('#profileFriend');
     frBtn.classList.toggle('on', isFriend(key));
     frBtn.querySelector('span').textContent = isFriend(key) ? 'صديق ✓' : 'إضافة صديق';
+    const gp = $('#giftPicker'); // v1.5: the gift picker resets on every re-render
+    if (gp) gp.style.display = 'none';
   }
+  // ---- v1.5: gift picker (inside the profile sheet) ----
+  // Lists the gifts the player OWNS; tapping one consumes it and raises
+  // this NPC's like count (+2 for their favorite gift, else +1).
+  function renderGiftPicker() {
+    const list = $('#giftList');
+    const owned = shopUI.ownedGifts();
+    if (!owned.length) {
+      list.innerHTML = '<span class="mut" style="font-size:13px;line-height:1.7">لا هدايا في مخزونك — اشترِ من متجر الهدايا أو سوق المزارع</span>';
+      return;
+    }
+    list.innerHTML = owned.map((o) =>
+      '<button class="gift-chip" data-gift="' + o.item.id + '">'
+      + '<span class="gift-dot" style="background:' + o.item.color + '"></span>'
+      + escapeHtml(o.item.name) + ' ×' + o.count
+      + (o.item.fav === currentKey ? ' <b>★ مفضلة</b>' : '')
+      + '</button>'
+    ).join('');
+  }
+
 
   // Small live 3D preview: same small-renderer pattern as the creator
   // thumbs, full body, slowly spinning while the sheet is open. One
@@ -1003,6 +1346,25 @@ const socialUI = (() => {
     $('#profileLike').addEventListener('click', toggleLike);
     $('#profileFriend').addEventListener('click', toggleFriend);
     $('#profileMessage').addEventListener('click', () => { if (currentKey) openChat(currentKey); });
+    // v1.5: gift button — toggles the owned-gifts picker inside the sheet
+    $('#profileGift').addEventListener('click', () => {
+      if (!currentKey) return;
+      const picker = $('#giftPicker');
+      if (picker.style.display === 'block') { picker.style.display = 'none'; return; }
+      renderGiftPicker();
+      picker.style.display = 'block';
+    });
+    $('#giftList').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-gift]');
+      if (!btn || !currentKey) return;
+      const pts = shopUI.giveGift(currentKey, btn.dataset.gift);
+      if (pts > 0) {
+        toast('أهديت ' + shopUI.ITEMS[btn.dataset.gift].name + ' إلى ' + getProfile(currentKey).name + ' (+' + pts + ' إعجاب)');
+        renderProfile(currentKey);
+      } else {
+        toast('لا تملك هذه الهدية');
+      }
+    });
     $('#chatBack').addEventListener('click', closeChat);
     $('#chatSend').addEventListener('click', sendMessage);
     $('#chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
@@ -1052,6 +1414,55 @@ const socialUI = (() => {
   return { wire, openProfile, closeSheet, closeChat, renderFriends, renderMyProfile };
 })();
 
+// ================= MAP PICKER (v1.5) =================
+// Lists the maps in the registry (MAPS) — A only in 1.5.0; B/C/D appear
+// here automatically once registered. Switching saves 'suli-map' and
+// reloads (same pattern as the quality setting: the village screen is
+// built once per load from the selected map). Choosing the current map
+// just closes the sheet.
+const mapUI = (() => {
+  let openedAt = 0;
+  function renderList() {
+    const cur = selectedMapId();
+    $('#mapList').innerHTML = MAPS.map((m) =>
+      '<button class="map-row' + (m.id === cur ? ' on' : '') + '" data-map="' + m.id + '">'
+      + '<span class="map-name">' + m.name + '</span>'
+      + (m.id === cur ? '<span class="map-tick">✓ الحالية</span>' : '<span class="map-tick mut">اختيار</span>')
+      + '</button>'
+    ).join('');
+  }
+  function openSheet() {
+    openedAt = Date.now();
+    renderList();
+    $('#mapScrim').classList.add('show');
+    $('#mapSheet').classList.add('show');
+  }
+  function justOpened() { return Date.now() - openedAt < 400; }
+  function closeSheet() {
+    $('#mapScrim').classList.remove('show');
+    $('#mapSheet').classList.remove('show');
+  }
+  function wire() {
+    $('#mapPickerEntry').addEventListener('click', openSheet);
+    $('#mapClose').addEventListener('click', () => { if (!justOpened()) closeSheet(); });
+    $('#mapScrim').addEventListener('click', () => { if (!justOpened()) closeSheet(); });
+    $('#mapList').addEventListener('click', (e) => {
+      const row = e.target.closest('[data-map]');
+      if (!row) return;
+      const id = row.dataset.map;
+      if (id === selectedMapId()) { closeSheet(); return; }
+      try { localStorage.setItem(MAP_KEY, id); } catch (err) {}
+      setTimeout(() => window.location.reload(), 350);
+    });
+    // the home entry subtitle + the village title show the current map
+    const sub = $('#mapPickerSub');
+    if (sub) sub.textContent = ACTIVE_MAP.name;
+    const vt = $('#villageTitle');
+    if (vt) vt.textContent = ACTIVE_MAP.name;
+  }
+  return { wire, openSheet, closeSheet };
+})();
+
 // ================= SCREEN MANAGER =================
 const screens = {
   home: homeScreen,
@@ -1064,7 +1475,7 @@ const screens = {
 let current = 'home';
 
 window.__suli = {
-  version: '1.4.2',
+  version: '1.5.0',
   screen: 'home',
   ready: {},
   playerPos: (name) => {
@@ -1080,6 +1491,13 @@ window.__suli = {
   kaitoSpan: () => villageScreen.kaitoSpan(), // v1.4.1: Kaito's on-screen height (viewport fraction)
   cameraPos: () => villageScreen.cameraPos(), // v1.4.1: village camera position
   quality: () => ({ stored: storedQuality(), resolved: resolveQuality(), renderer: villageScreen.quality() }), // v1.4.1
+  shopScreen: (id) => villageScreen.shopScreen(id), // v1.5: project a shop to page pixels
+  coins: () => shopUI.coins(), // v1.5: coin balance
+  inventory: () => shopUI.inventory(), // v1.5: owned items { itemId: count }
+  giftLikes: (key) => shopUI.giftLikeCount(key), // v1.5: likes earned by gifting
+  openShop: (id) => shopUI.openShop(id), // v1.5: open a shop sheet directly
+  map: () => ({ id: ACTIVE_MAP.id, name: ACTIVE_MAP.name }), // v1.5: selected map
+  maps: () => MAPS.map((m) => ({ id: m.id, name: m.name })), // v1.5: registry
 };
 
 async function show(name) {
@@ -1088,6 +1506,8 @@ async function show(name) {
   // would otherwise cover the new screen)
   socialUI.closeSheet();
   socialUI.closeChat();
+  shopUI.closeShop(); // v1.5: same for the shop sheet
+  mapUI.closeSheet(); // v1.5: same for the map picker
   const prev = screens[current];
   if (prev) prev.stop();
   current = name;
@@ -1117,4 +1537,7 @@ window.addEventListener('resize', () => {
 // boot: home screen first
 creatorScreen.wireUI();
 socialUI.wire();
+shopUI.wire(); // v1.5: shop sheet + live coin balance
+shopUI.dailyBonus(); // v1.5: +100 coins once per day (toast when granted)
+mapUI.wire(); // v1.5: map picker (home entry + sheet)
 homeScreen.init().then(() => homeScreen.start()).catch(() => {});
