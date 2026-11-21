@@ -15,7 +15,7 @@ h1,h2,h3,.t{font-family:'Noto Kufi Arabic','Noto Sans Arabic',sans-serif}
   width:100%;max-width:780px;margin:0 auto;
   height:100vh;height:100dvh;
   background:#FBF3E2;position:relative;
-  display:flex;flex-direction:column;overflow:hidden;
+  display:flex;flex-direction:column;overflow:clip;
 }
 
 /* ---------- top bar ---------- */
@@ -329,3 +329,27 @@ input[type=range].slider::-moz-range-thumb{width:22px;height:22px;border-radius:
   font-size:14px;font-weight:800;color:#D96C8A;padding:14px;cursor:pointer;margin-top:4px}
 .btn:disabled{opacity:.6;cursor:wait}
 .btn:disabled:active{transform:none}
+
+/* ---------- v1.7: delete account (danger zone + confirmation) ---------- */
+.danger-zone{border:2px solid #F0C4BE;background:#FFF5F3;padding:16px}
+.danger-zone b{display:block;color:#C0392B;font-size:15px}
+.danger-zone p{font-size:12px;line-height:1.8;color:#8A7A6B;margin:6px 0 14px}
+.btn.danger{background:#C0392B}
+.delete-list{display:flex;flex-direction:column;gap:7px;margin-top:12px}
+.delete-list span{display:flex;align-items:center;gap:8px;background:#FFFFFF;
+  border:1px solid #F0C4BE;border-radius:11px;padding:10px 13px;
+  font-size:13px;font-weight:700}
+.delete-list span::before{content:'';width:7px;height:7px;border-radius:50%;
+  background:#C0392B;flex:none}
+
+/* ---------- v1.7: NPC greeting bubble (living NPCs) ---------- */
+/* One shared bubble, repositioned every frame above the nearest NPC in
+   range. pointer-events:none so it never blocks taps; z-index 7 sits
+   above the canvas + pills but below the loading overlay (8) and the
+   sheets/scrims (60+). The JS clamps it clear of the joystick zone. */
+.npc-bubble{position:absolute;z-index:7;left:0;top:0;display:none;width:max-content;
+  max-width:230px;background:#FFFFFF;border:1.5px solid #EADFC6;border-radius:16px;
+  border-bottom-left-radius:4px;padding:9px 13px;font-size:13px;font-weight:700;
+  line-height:1.6;color:#3E2C22;box-shadow:0 4px 16px rgba(90,60,30,.18);
+  pointer-events:none;transform:translate(-50%,-100%);text-align:center}
+.npc-bubble.show{display:block}

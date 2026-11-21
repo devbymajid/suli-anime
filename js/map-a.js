@@ -1,7 +1,11 @@
 // Suli Anime v1.5 — MAP A «الساحة المركزية» (central market square).
 // A self-contained map module: the ONLY export is MAP { id, name, bounds,
-// start, buildEnv } (see MAP-CONTRACT.md). The integrator imports it and
+// start, buildEnv, river } (see MAP-CONTRACT.md). The integrator imports it and
 // wires env: MAP.buildEnv, bounds: MAP.bounds, start: MAP.start.
+// `river` (v1.7) is the NPC crossing contract: the river is an x-band
+// [min,max] and `bridge` is the deck-centre point the living NPCs route
+// through when their waypoint is on the other bank; maps without a river
+// omit the field.
 //
 // Layout (design A): the whole village turns around a big circular stone
 // market plaza at (0,3) — the four shops ring it (fashion/colors north,
@@ -19,7 +23,7 @@
 // (v1.4.2 removed them); shop signs carry symbols only, no text;
 // no real anime IP — the Ghibli references inspired the mood only.
 import * as THREE from 'three';
-import { buildCharacter, fitHeight } from './characters-v4.js';
+import { buildArticulatedCharacter, fitHeight } from './characters-v4.js';
 import { getAppearance } from './appearance.js';
 
 // D1 palette («القرية اليابانية») — shared by every screen.
@@ -747,6 +751,10 @@ function buildEnv(scene) {
   addCollider(-11, -12, 1.6);
   // NPCs: the other 3 default characters, around the square and the shops
   // (each > 1.0 from every collider edge — see NOTES.md for the distances).
+  // v1.7: ARTICULATED builds (same look as buildCharacter) — the living-NPC
+  // controller in main.js drives them with the Player walk class, so they
+  // wander the map. Their blob shadow disc is returned in the handle so
+  // main.js can move it with the NPC (a static disc would stay at spawn).
   const npcs = [
     { x: -3.8, z: 4.2, ry: 2.4, key: 'sara' },
     { x: 5.8, z: 4.2, ry: -2.2, key: 'yusuf' }, // moved east: clear of the new south-east stall
@@ -754,7 +762,7 @@ function buildEnv(scene) {
   ];
   const handles = [];
   for (const p of npcs) {
-    const a = buildCharacter(p.key, getAppearance(p.key));
+    const a = buildArticulatedCharacter(p.key, getAppearance(p.key));
     fitHeight(a, 1.37, 0);
     a.position.x = p.x; a.position.z = p.z; a.rotation.y = p.ry;
     a.userData.npcKey = p.key;
@@ -762,9 +770,10 @@ function buildEnv(scene) {
     hit.position.y = 0.95;
     a.add(hit);
     scene.add(a);
-    scene.add(shadowDisc(p.x, p.z, 0.42));
+    const disc = shadowDisc(p.x, p.z, 0.42);
+    scene.add(disc);
     // v1.4.2: no name labels above NPCs — name + level live in the profile.
-    handles.push({ key: p.key, group: a });
+    handles.push({ key: p.key, group: a, disc: disc });
   }
   // v1.4.1: shadow flags for the whole map (no-op on low quality).
   applyShadowFlags(scene);
@@ -791,4 +800,8 @@ export const MAP = {
   bounds: { minX: -20, maxX: 20, minZ: -18, maxZ: 20 },
   start: { x: 0, z: 8, ry: 0 }, // facing -Z: north shops, stalls and plaza ahead
   buildEnv: buildEnv,
+  // v1.7: river x-band + bridge deck centre (13,3) — the living NPCs route
+  // through the deck when crossing banks (deck gap z 0.6..5.4 at x=13,
+  // i.e. bridge.z ± 2.4 = `gap`, the open collider corridor).
+  river: { min: 11.5, max: 14.5, bridge: { x: 13, z: 3 }, gap: 2.4 },
 };

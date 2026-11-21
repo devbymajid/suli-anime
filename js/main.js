@@ -27,6 +27,10 @@
 // avatar (characters-v4.js), driven by the same Player walk class.
 // Passwords are SHA-256 hashed (account.js) — never stored in plaintext.
 // No sexual content anywhere: this is a clean social world for adults.
+// v1.7 adds LIVING NPCs (the village NPCs wander the map on the same
+// Player walk class, pause, greet the player up close with a speech
+// bubble, and cross the bridge on its deck) and DELETE ACCOUNT (account
+// screen danger zone, two-step confirmation, wipes every suli-* key).
 import * as THREE from 'three';
 import { loadVRM, poseVRM, fitVRM, baseRenderer, shadowDisc, buildCreatorEnv, buildHomeEnv, storedQuality, setStoredQuality, resolveQuality } from './env.js';
 import { Player, FollowCamera, FixedCamera, createInput } from './player.js';
@@ -87,7 +91,7 @@ function toast(msg) {
 
 // ---------- loading overlay helpers ----------
 function loadError(loadEl, retry) {
-  loadEl.innerHTML = '<b>تعذّر التحميل</b><p>تأكد من أن الخادم المحلي يعمل وأن ملف النموذج موجود، ثم أعد المحاولة</p><button class="btn">إعادة المحاولة</button>';
+  loadEl.innerHTML = '<b>تعذّر التحميل</b><p>حدث خطأ أثناء التحميل — أعد المحاولة، وإن استمر المشكل أعد تحميل الصفحة</p><button class="btn">إعادة المحاولة</button>';
   loadEl.querySelector('.btn').addEventListener('click', () => {
     loadEl.innerHTML = '<div class="spin"></div><b>جارٍ التحميل</b><p>لحظات فقط</p>';
     retry();
@@ -232,6 +236,330 @@ function makeWalkScreen(opts) {
     shopUI.openShop(o.userData.shopId);
     return true;
   }
+
+  // ================= v1.7: LIVING NPCs =================
+  // The village NPCs wander the map: each gets its own Player instance
+  // (the SAME v1.1 walk class as the player — player.js untouched, just
+  // reused at a slower stroll speed), picks random reachable waypoints,
+  // pauses at each, and greets the player up close. Positions are
+  // session-only: on reload the NPCs are back at their map spawn spots.
+  // Waypoints are straight-line walks: the path is NOT planned around
+  // buildings — a waypoint behind a building makes the NPC push against
+  // it until the stuck detector fires (no progress for 2.5s), then it
+  // re-picks nearby. The RIVER is the one planned obstacle: a waypoint
+  // on the other bank routes via staging -> bridge deck -> landing legs,
+  // all on the bridge axis, so the NPC only ever crosses water on stone.
+  // Performance: the articulated NPCs carry the same meshes as the static
+  // builds (re-parented under pivots) — no new meshes, no per-frame
+  // allocations beyond a few small objects; the greeting bubble is one
+  // shared DOM element repositioned per frame.
+  const NPC_GREETINGS = {
+    sara: ['أهلاً! الجو جميل اليوم', 'أحب أزهار الساكورا هنا', 'هل زرت المتاجر الجديدة؟', 'تعال، لنتحدث قليلاً'],
+    yusuf: ['هلا! كيف حالك؟', 'القرية هادئة اليوم', 'يوم جميل للمشي', 'جربت سوق المزارع؟'],
+    layan: ['مرحباً بك في القرية', 'أحب الهدوء هنا', 'منظر الجسر جميل اليوم', 'يوم سعيد!'],
+  };
+  const NPC_SPEED = 1.15;      // stroll speed (u/s) — the player walks 2.4
+  const NPC_GREET_DIST = 2.5;  // greeting range (world units)
+  const NPC_SEP = 0.8;         // NPC-NPC / NPC-player separation radius
+  const NPC_STUCK_MS = 2500;   // no progress for this long = stuck, re-pick
+  let living = null;           // [{ key, walker, disc, state, legs, ... }]
+  let crossings = 0;           // completed bridge crossings (test hook)
+  let greetKey = null, greetIdx = 0, greetUntil = 0; // bubble phrase state
+
+  function npcLerpAngle(a, b, t) {
+    let d = (b - a) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    if (d < -Math.PI) d += Math.PI * 2;
+    return a + d * t;
+  }
+  // Is (x,z) a legal NPC waypoint? Inside the bounds, outside the river
+  // band (unless allowRiver — the bridge deck point), clear of every
+  // collider by `margin`, and clear of shop fronts (an NPC standing on a
+  // shop apron would intercept taps meant for the shop — pickNPC runs
+  // first). Trees have no colliders (the player walks through them too).
+  function npcClear(x, z, margin, allowRiver) {
+    const b = opts.bounds;
+    if (x < b.minX + margin || x > b.maxX - margin || z < b.minZ + margin || z > b.maxZ - margin) return false;
+    const r = opts.river;
+    if (r && !allowRiver && x > r.min - 0.3 && x < r.max + 0.3) return false;
+    if (colliders) {
+      for (const c of colliders) {
+        if (Math.hypot(x - c.x, z - c.z) < c.r + margin) return false;
+      }
+    }
+    if (shops) {
+      for (const s of shops) {
+        const p = s.group.position;
+        if (Math.hypot(x - p.x, z - p.z) < 2.8) return false;
+      }
+    }
+    return true;
+  }
+  function npcBank(p) {
+    const r = opts.river;
+    if (!r) return 0;
+    return p.x < r.min ? -1 : (p.x > r.max ? 1 : 0);
+  }
+  // Legs for a walk from `from` to `to`. Same bank (or no river) = direct.
+  // Other bank = staging (near bank, on the bridge axis) -> deck centre
+  // -> landing (far bank, on the bridge axis) -> target. Each leg is a
+  // straight line that never touches water: the staging leg stays on the
+  // near bank, the deck legs run along the bridge axis through the open
+  // collider gap, and the final leg starts past the far bank edge.
+  // Returns null when a leg point cannot be placed clear (the caller
+  // re-picks a same-bank waypoint instead).
+  function npcLegs(from, to) {
+    const r = opts.river;
+    if (!r) return [to];
+    const b1 = npcBank(from), b2 = npcBank(to);
+    if (b1 === 0 || b2 === 0 || b1 === b2) return [to];
+    const bz = r.bridge.z;
+    const stage = { x: b1 < 0 ? r.min - 2.0 : r.max + 2.0, z: bz };
+    const land = { x: b2 < 0 ? r.min - 2.0 : r.max + 2.0, z: bz };
+    const deck = { x: r.bridge.x, z: bz };
+    const place = (pt, allowRiver) => {
+      const tries = [[0, 0], [0, 0.8], [0, -0.8], [0.5, 0], [-0.5, 0], [0, 1.5], [0, -1.5]];
+      for (const t of tries) {
+        const x = pt.x + t[0], z = pt.z + t[1];
+        if (npcClear(x, z, 0.4, allowRiver)) return { x: x, z: z };
+      }
+      return null;
+    };
+    const s = place(stage, false);
+    const d = place(deck, true); // the deck IS in the river band
+    const l = place(land, false);
+    if (!s || !d || !l) return null;
+    return [s, d, l, to];
+  }
+  // Pick a random waypoint (validated + spread out from the other NPCs)
+  // and return its legs, or null when nothing validates after 14 tries.
+  // `close` (after a stuck event) picks within 6 units — more likely
+  // reachable than another far waypoint behind the same building.
+  function npcPickWaypoint(n, close) {
+    const b = opts.bounds;
+    const px = n.walker.position.x, pz = n.walker.position.z;
+    for (let i = 0; i < 14; i++) {
+      const x = close ? px + (Math.random() * 12 - 6) : b.minX + 2 + Math.random() * (b.maxX - b.minX - 4);
+      const z = close ? pz + (Math.random() * 12 - 6) : b.minZ + 2 + Math.random() * (b.maxZ - b.minZ - 4);
+      if (Math.hypot(x - px, z - pz) < 3) continue; // actually go somewhere
+      if (!npcClear(x, z, 0.5, false)) continue;
+      let clash = false;
+      for (const o of living) {
+        if (o === n) continue;
+        const t = o.walker.target;
+        if (t && Math.hypot(x - t.x, z - t.z) < 1.5) { clash = true; break; }
+        if (Math.hypot(x - o.walker.position.x, z - o.walker.position.z) < 1.5) { clash = true; break; }
+      }
+      if (clash) continue;
+      const legs = npcLegs({ x: px, z: pz }, { x: x, z: z });
+      if (!legs) continue; // crossing unplaceable — try another waypoint
+      return legs;
+    }
+    return null;
+  }
+  function npcStartWalk(n, legs) {
+    n.legs = legs.slice(1);
+    n.walker.setTarget(legs[0].x, legs[0].z);
+    n.state = 'walk';
+    n.startBank = npcBank(n.walker.position);
+    n.lastMove = performance.now();
+    n.lastX = n.walker.position.x; n.lastZ = n.walker.position.z;
+  }
+  function initLiving() {
+    if (!npcs || !npcs.length) return;
+    living = npcs.map((h, i) => {
+      // the articulated NPCs face -Z; the map's spawn ry was authored for
+      // the +Z-facing static build, so the Player's facing is ry + PI
+      // (same visual facing as before).
+      const walker = new Player(h.group, opts.bounds, {
+        x: h.group.position.x, z: h.group.position.z, ry: h.group.rotation.y + Math.PI,
+      });
+      walker.speed = NPC_SPEED;
+      return {
+        key: h.key, walker: walker, disc: h.disc || null,
+        state: 'idle', legs: [], startBank: 0,
+        idleUntil: performance.now() + 1500 + i * 1200 + Math.random() * 1500,
+        heading: walker.facing,
+        lastX: h.group.position.x, lastZ: h.group.position.z, lastMove: performance.now(),
+        stuck: 0,
+      };
+    });
+  }
+  // Push an NPC out of a circle (collider / shop apron) + slide it
+  // tangentially toward its target side. The slide is ESSENTIAL: a
+  // head-on approach to a collider pins the NPC — the Player's forward
+  // step is cancelled exactly by the radial push-out, so it stands still
+  // against the obstacle until the stuck detector fires. The slide orbits
+  // it around the obstacle instead (at walk speed, in game time, so
+  // orbiting costs no extra time). `slide=false` = radial only (used
+  // after the separation pass, which has no target context).
+  // Radii: waypoints validate at 2.8 from shops, the push-out enforces
+  // 2.7 — the 0.1 gap means a waypoint is never inside the push-out
+  // circle, so the NPC never jitters between the two.
+  function npcPushOut(n, cx, cz, r, dt, slide) {
+    const p = n.walker.position;
+    const dx = p.x - cx, dz = p.z - cz;
+    const d = Math.hypot(dx, dz);
+    if (d >= r) return;
+    if (d < 1e-4) { p.x = cx + r; return; }
+    p.x = cx + dx / d * r;
+    p.z = cz + dz / d * r;
+    if (!slide) return;
+    const t = n.walker.target;
+    if (!t || !dt) return;
+    let ux = -dz / d, uz = dx / d; // one perpendicular of the radial
+    const wx = t.x - p.x, wz = t.z - p.z;
+    if (ux * wx + uz * wz < 0) { ux = -ux; uz = -uz; } // toward the target side
+    const s = NPC_SPEED * dt;
+    p.x += ux * s;
+    p.z += uz * s;
+  }
+  function npcSeparate(a, b, min, moveAOnly) {
+    const dx = a.x - b.x, dz = a.z - b.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 1e-4) { a.x += 0.3; return; } // exactly on top — nudge apart
+    if (d >= min) return;
+    const push = (min - d) / (moveAOnly ? 1 : 2);
+    const ux = dx / d, uz = dz / d;
+    a.x += ux * push; a.z += uz * push;
+    if (!moveAOnly) { b.x -= ux * push; b.z -= uz * push; }
+  }
+  // One shared greeting bubble above the nearest NPC in range (rotating
+  // phrases per NPC, every 4s). Clamped inside the viewport and clear of
+  // the joystick zone (bottom 150px) and the top pills — it never touches
+  // another UI element. Hidden while any sheet/chat is open.
+  function updateBubble() {
+    const el = $('#npcBubble');
+    if (!el || !living || current !== 'village') {
+      if (el) el.classList.remove('show');
+      return;
+    }
+    let best = null, bestD = NPC_GREET_DIST;
+    for (const n of living) {
+      const d = Math.hypot(n.walker.position.x - player.position.x, n.walker.position.z - player.position.z);
+      if (d < bestD) { bestD = d; best = n; }
+    }
+    if (!best || document.querySelector('.scrim.show') || document.querySelector('.chatov.show')) {
+      el.classList.remove('show');
+      greetKey = null;
+      return;
+    }
+    const now = performance.now();
+    const phrases = NPC_GREETINGS[best.key] || NPC_GREETINGS.sara;
+    if (greetKey !== best.key) { greetKey = best.key; greetIdx = 0; greetUntil = now + 4000; }
+    else if (now > greetUntil) { greetIdx = (greetIdx + 1) % phrases.length; greetUntil = now + 4000; }
+    // Anchor just above the head (head top ~1.37 after fitHeight): the
+    // first anchor (2.05) floated the bubble ~100px above the NPC at
+    // close range — the camera looks down, so height reads large on
+    // screen — and the bubble looked detached from its speaker (seen in
+    // the run-5 screenshots, proven by the bubble diagnostic: bubble
+    // bottom 118px vs the NPC's head at ~211px). 1.60 leaves a ~35px
+    // speech-bubble gap at close range, less further away, and never
+    // touches the head even at the top of the walk bob.
+    const v = new THREE.Vector3(best.walker.position.x, 1.60, best.walker.position.z);
+    v.project(camera);
+    const r = renderer.domElement.getBoundingClientRect();
+    if (v.z > 1 || Math.abs(v.x) > 1.05 || Math.abs(v.y) > 1.05) {
+      el.classList.remove('show');
+      return;
+    }
+    el.textContent = phrases[greetIdx];
+    el.classList.add('show'); // show first: offsetWidth reads 0 while hidden
+    // X clamp honours the bubble's real width (it varies with the phrase),
+    // so a long phrase near the screen edge never overflows the viewport.
+    const half = (el.offsetWidth || 140) / 2 + 8;
+    const px = Math.max(half, Math.min(r.width - half, (v.x + 1) / 2 * r.width));
+    const py = Math.max(60, Math.min(r.height - 160, (1 - v.y) / 2 * r.height));
+    el.style.left = px + 'px';
+    el.style.top = py + 'px';
+  }
+  function updateLiving(dt) {
+    if (!living) return;
+    const now = performance.now();
+    const r = opts.river;
+    for (const n of living) {
+      if (n.state === 'idle') {
+        // slow turn toward a random heading while standing
+        n.walker.facing = npcLerpAngle(n.walker.facing, n.heading, Math.min(1, dt * 1.5));
+        n.walker.model.rotation.y = n.walker.facing;
+        n.walker.update(dt, null); // eases the pose back to standing
+        if (now > n.idleUntil) {
+          const legs = npcPickWaypoint(n, n.stuck > 0);
+          if (legs) npcStartWalk(n, legs);
+          else n.idleUntil = now + 3000; // nowhere to go — try again later
+        }
+      } else {
+        n.walker.update(dt, null);
+        // collider push-out (same circles as the player) + shop aprons:
+        // NPCs never stand on a shop front (they would intercept taps
+        // meant for the shop — pickNPC runs first). Both use npcPushOut
+        // (radial + tangential slide) so head-on approaches orbit the
+        // obstacle instead of pinning against it. Then re-clamp to bounds.
+        if (colliders) {
+          for (const c of colliders) npcPushOut(n, c.x, c.z, c.r, dt, true);
+        }
+        if (shops) {
+          for (const s of shops) npcPushOut(n, s.group.position.x, s.group.position.z, 2.7, dt, true);
+        }
+        n.walker.position.x = Math.max(opts.bounds.minX, Math.min(opts.bounds.maxX, n.walker.position.x));
+        n.walker.position.z = Math.max(opts.bounds.minZ, Math.min(opts.bounds.maxZ, n.walker.position.z));
+        // river guard: separation pushes can nudge an NPC a few cm into
+        // the water's edge — while inside the band, clamp z into the open
+        // deck corridor so the NPC never stands in water (the deck legs
+        // already run on the bridge axis, so this only ever bites on a
+        // sideways nudge).
+        if (r && n.walker.position.x > r.min && n.walker.position.x < r.max) {
+          n.walker.position.z = Math.max(r.bridge.z - r.gap, Math.min(r.bridge.z + r.gap, n.walker.position.z));
+        }
+        // arrival: the Player clears its target within 0.18 of it
+        if (!n.walker.target) {
+          if (n.legs.length) {
+            const next = n.legs.shift();
+            n.walker.setTarget(next.x, next.z);
+            n.lastMove = now;
+          } else {
+            if (n.startBank !== 0 && npcBank(n.walker.position) !== 0
+              && npcBank(n.walker.position) !== n.startBank) crossings++;
+            n.state = 'idle';
+            n.stuck = 0;
+            n.idleUntil = now + 2000 + Math.random() * 3000;
+            n.heading = Math.random() * Math.PI * 2;
+          }
+        } else {
+          // stuck: a target but no real progress for 2.5s (pushed against
+          // a building / river chain) — abandon it and re-pick nearby
+          const moved = Math.hypot(n.walker.position.x - n.lastX, n.walker.position.z - n.lastZ);
+          if (moved > 0.1) { n.lastX = n.walker.position.x; n.lastZ = n.walker.position.z; n.lastMove = now; }
+          else if (now - n.lastMove > NPC_STUCK_MS) {
+            n.walker.cancelTarget();
+            n.legs = [];
+            n.state = 'idle';
+            n.stuck++;
+            n.idleUntil = now + 800 + Math.random() * 800;
+          }
+        }
+      }
+      // the blob shadow disc follows the NPC
+      if (n.disc) { n.disc.position.x = n.walker.position.x; n.disc.position.z = n.walker.position.z; }
+    }
+    // separation: NPCs never overlap each other or the player (the player
+    // is never moved — only the NPC yields)
+    for (let i = 0; i < living.length; i++) {
+      for (let j = i + 1; j < living.length; j++) {
+        npcSeparate(living[i].walker.position, living[j].walker.position, NPC_SEP, false);
+      }
+      npcSeparate(living[i].walker.position, player.position, NPC_SEP + 0.1, true);
+    }
+    // separation can nudge an NPC onto a shop apron — push back out
+    // (radial only; the walk branch above already slides)
+    if (shops) {
+      for (const n of living) {
+        for (const s of shops) npcPushOut(n, s.group.position.x, s.group.position.z, 2.7, 0, false);
+      }
+    }
+    updateBubble();
+  }
+
   async function init() {
     if (ready) return;
     if (initPromise) return initPromise;
@@ -310,6 +638,7 @@ function makeWalkScreen(opts) {
       }
       $(opts.load).classList.add('hidden');
       ready = true;
+      initLiving(); // v1.7: the village NPCs start wandering (room: no-op)
       window.__suli.ready[opts.name] = true;
     })();
     return initPromise;
@@ -360,6 +689,7 @@ function makeWalkScreen(opts) {
         }
         disc.position.x = player.position.x;
         disc.position.z = player.position.z;
+        updateLiving(dt); // v1.7: wander the NPCs + greeting bubble
         renderer.render(scene, camera);
       });
     },
@@ -450,6 +780,35 @@ function makeWalkScreen(opts) {
       if (!ready || !av) return;
       tintPlayerModel(av);
     },
+    // v1.7 test hooks: living NPC state + greeting + forced waypoint
+    npcState() {
+      if (!ready || !living) return null;
+      return living.map((n) => ({
+        key: n.key,
+        x: +n.walker.position.x.toFixed(2), z: +n.walker.position.z.toFixed(2),
+        state: n.state, moving: n.walker.moving,
+        target: n.walker.target ? { x: +n.walker.target.x.toFixed(2), z: +n.walker.target.z.toFixed(2) } : null,
+        legs: n.legs.length,
+      }));
+    },
+    greeting() {
+      const el = $('#npcBubble');
+      if (!el || !el.classList.contains('show')) return null;
+      return { key: greetKey, phrase: el.textContent };
+    },
+    // Force an NPC to walk to (x, z) — routes via the bridge when the
+    // point is on the other bank. Returns false for an illegal point.
+    npcGoTo(key, x, z) {
+      if (!ready || !living) return false;
+      const n = living.find((o) => o.key === key);
+      if (!n || !npcClear(x, z, 0.5, false)) return false;
+      const legs = npcLegs({ x: n.walker.position.x, z: n.walker.position.z }, { x: x, z: z });
+      if (!legs) return false;
+      n.stuck = 0;
+      npcStartWalk(n, legs);
+      return true;
+    },
+    npcCrossings() { return crossings; },
   };
   return api;
 }
@@ -459,6 +818,7 @@ const villageScreen = makeWalkScreen({
   env: ACTIVE_MAP.buildEnv, // v1.5: env/bounds/start come from the selected map
   bounds: ACTIVE_MAP.bounds,
   start: ACTIVE_MAP.start,
+  river: ACTIVE_MAP.river, // v1.7: river x-band + bridge point (NPC crossing)
   // v1.4.1: closer follow camera (was 4.6) — Kaito reads bigger and
   // sharper on the phone. Height unchanged (2.7), so the camera still
   // passes under the torii beams (y 2.95/3.42).
@@ -482,12 +842,17 @@ const creatorScreen = (() => {
   let ready = false, initPromise = null;
   let renderer, scene, camera, group, loop = makeLoop(), spin = 0;
   let currentChar = 'kaito', currentModel = null, kaitoModel = null;
-  const state = loadSaved() || {
+  // v1.7 FIX (live-test 1.6.0 HIGH): signup writes suli-character
+  // PARTIALLY ({name, gender} only) — the old `loadSaved() || defaults`
+  // let that partial object override ALL defaults, so after any reload
+  // state.char was undefined and the creator crashed forever. Merge the
+  // saved state OVER the defaults: any partial save stays safe.
+  const state = Object.assign({
     char: 'kaito', name: 'كايتو', gender: 'm', height: 175, athletic: true,
     hairstyle: 'short', haircolor: '#4a2c2a', face: 'round',
     eyecolor: '#4a2c2a', eyeshape: 'big', build: 'medium',
     outfit: 'hoodie-white', outfitcolor: '#f5f5f5', skin: '#ffd9b3',
-  };
+  }, loadSaved());
   if (!state.outfitcolor) state.outfitcolor = '#f5f5f5'; // v1.3: old saves
 
   function loadSaved() {
@@ -1602,8 +1967,16 @@ const accountUI = (() => {
       // (profile, creator, home hero) — the v1.3 identity sync
       saveProfileOverride('kaito', { name: res.account.name });
       try {
+        // v1.7 FIX: write the FULL character state at signup (same
+        // defaults as the creator module) — the old partial write
+        // ({name, gender} only) broke the creator after any reload.
         const raw = localStorage.getItem('suli-character');
-        const st = raw ? JSON.parse(raw) : {};
+        const st = Object.assign({
+          char: 'kaito', name: 'كايتو', gender: 'm', height: 175, athletic: true,
+          hairstyle: 'short', haircolor: '#4a2c2a', face: 'round',
+          eyecolor: '#4a2c2a', eyeshape: 'big', build: 'medium',
+          outfit: 'hoodie-white', outfitcolor: '#f5f5f5', skin: '#ffd9b3',
+        }, raw ? JSON.parse(raw) : {});
         st.name = res.account.name;
         st.gender = gender;
         localStorage.setItem('suli-character', JSON.stringify(st));
@@ -1680,9 +2053,48 @@ const accountUI = (() => {
       accountStore.endSession();
       window.location.reload();
     });
+    // v1.7: delete account — wired here with the other account-screen
+    // buttons. The danger-zone button only OPENS the confirmation sheet;
+    // the actual wipe happens in the sheet's «حذف نهائي» button below.
+    const del = $('#deleteAccountBtn');
+    if (del) del.addEventListener('click', openDeleteSheet);
+    const dc = $('#deleteClose');
+    if (dc) dc.addEventListener('click', () => { if (!deleteJustOpened()) closeDeleteSheet(); });
+    const ds = $('#deleteScrim');
+    if (ds) ds.addEventListener('click', () => { if (!deleteJustOpened()) closeDeleteSheet(); });
+    const dcan = $('#deleteCancelBtn');
+    if (dcan) dcan.addEventListener('click', closeDeleteSheet);
+    const dconf = $('#deleteConfirmBtn');
+    if (dconf) dconf.addEventListener('click', () => {
+      // the wipe + reload: after the reload there is no account, so the
+      // gate shows the signup screen — the game is exactly as on first
+      // launch. Server-side deletion comes with the Firebase backend
+      // (account.js documents the adapter contract).
+      accountStore.wipeAllLocalData();
+      window.location.reload();
+    });
   }
 
-  return { wire, submitSignup, submitLogin };
+  // ---- v1.7: delete account (two-step, mandatory) ----
+  // Step 1: the danger-zone button on the account screen opens this
+  // confirmation sheet (what gets wiped, in plain words). Step 2: the
+  // red «حذف نهائي» button wipes every suli-* key and reloads. Cancel /
+  // scrim / X all close the sheet with nothing deleted. The 400ms guard
+  // is the same scrim-guard pattern as the other sheets (a synthetic
+  // mouse click from the opening tap must not close it instantly).
+  let deleteOpenedAt = 0;
+  function deleteJustOpened() { return Date.now() - deleteOpenedAt < 400; }
+  function openDeleteSheet() {
+    deleteOpenedAt = Date.now();
+    $('#deleteScrim').classList.add('show');
+    $('#deleteSheet').classList.add('show');
+  }
+  function closeDeleteSheet() {
+    $('#deleteScrim').classList.remove('show');
+    $('#deleteSheet').classList.remove('show');
+  }
+
+  return { wire, submitSignup, submitLogin, closeDeleteSheet };
 })();
 
 // v1.6: push the account's identity into every place that shows the
@@ -1737,7 +2149,7 @@ const screens = {
 let current = 'home';
 
 window.__suli = {
-  version: '1.6.0',
+  version: '1.7.0',
   screen: 'home',
   ready: {},
   playerPos: (name) => {
@@ -1768,6 +2180,10 @@ window.__suli = {
   isLoggedIn: () => accountStore.isLoggedIn(), // v1.6: session active?
   playerGender: () => playerGender(), // v1.6: 'm' | 'f'
   logout: () => { accountStore.endSession(); window.location.reload(); }, // v1.6 test hook
+  npcState: () => villageScreen.npcState(), // v1.7: living NPC positions/states
+  greeting: () => villageScreen.greeting(), // v1.7: current greeting bubble (or null)
+  npcGoTo: (key, x, z) => villageScreen.npcGoTo(key, x, z), // v1.7: force an NPC waypoint (routes via the bridge)
+  npcCrossings: () => villageScreen.npcCrossings(), // v1.7: completed bridge crossings
 };
 
 async function show(name) {
@@ -1783,6 +2199,7 @@ async function show(name) {
   socialUI.closeChat();
   shopUI.closeShop(); // v1.5: same for the shop sheet
   mapUI.closeSheet(); // v1.5: same for the map picker
+  accountUI.closeDeleteSheet(); // v1.7: same for the delete sheet
   const prev = screens[current];
   if (prev) prev.stop();
   current = name;

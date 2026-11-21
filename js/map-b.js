@@ -2,6 +2,9 @@
 // One of four switchable big maps. Self-contained ES module: it imports
 // only `three`, `./characters-v4.js` and `./appearance.js`; every helper
 // (palette, materials, canvas textures, building functions) lives inside.
+// v1.7: the MAP export also carries `river` (the NPC crossing contract:
+// the river is an x-band [min,max] and `bridge` is the deck-centre point
+// the living NPCs route through when crossing banks).
 // Adapted from the v1.5 draft env.js (delivery-bigmap-v15/js/env.js) with
 // a full re-layout on the B design (option-b-river-village.webp):
 //   - the river runs N-S through the MIDDLE of the map (x ~0) and the
@@ -18,7 +21,7 @@
 // are pictograms only (no readable text); no real anime IP, no copied
 // characters or creatures. Ground is flat (y=0) everywhere.
 import * as THREE from 'three';
-import { buildCharacter, fitHeight } from './characters-v4.js';
+import { buildArticulatedCharacter, fitHeight } from './characters-v4.js';
 import { getAppearance } from './appearance.js';
 
 // D1 palette («القرية اليابانية») — shared by every screen.
@@ -753,6 +756,10 @@ function buildEnv(scene) {
   // yusuf on the east bank by the farm shop, layan on the east bank by the
   // colors shop. Each stands > 1.0 clear of every collider edge (see
   // NOTES.md for the distances). NO name labels (v1.4.2).
+  // v1.7: ARTICULATED builds (same look as buildCharacter) — the living-NPC
+  // controller in main.js drives them with the Player walk class, so they
+  // wander the map. Their blob shadow disc is returned in the handle so
+  // main.js can move it with the NPC (a static disc would stay at spawn).
   const npcs = [
     { x: -4.6, z: 0.2, ry: -1.3, key: 'sara' },
     { x: 4.6, z: 7.5, ry: 0.55, key: 'yusuf' },
@@ -760,7 +767,7 @@ function buildEnv(scene) {
   ];
   const handles = [];
   for (const p of npcs) {
-    const a = buildCharacter(p.key, getAppearance(p.key));
+    const a = buildArticulatedCharacter(p.key, getAppearance(p.key));
     fitHeight(a, 1.37, 0);
     a.position.x = p.x; a.position.z = p.z; a.rotation.y = p.ry;
     a.userData.npcKey = p.key;
@@ -768,8 +775,9 @@ function buildEnv(scene) {
     hit.position.y = 0.95;
     a.add(hit);
     scene.add(a);
-    scene.add(shadowDisc(p.x, p.z, 0.42));
-    handles.push({ key: p.key, group: a });
+    const disc = shadowDisc(p.x, p.z, 0.42);
+    scene.add(disc);
+    handles.push({ key: p.key, group: a, disc: disc });
   }
   applyShadowFlags(scene);
   return {
@@ -796,4 +804,8 @@ export const MAP = {
   // atan2(-(0-(-3)), -(0-4.8)) = atan2(-3, 4.8) = -0.558
   start: { x: -3, z: 4.8, ry: -0.558 },
   buildEnv: buildEnv,
+  // v1.7: river x-band + bridge deck centre (0,0) — the living NPCs route
+  // through the deck when crossing banks (deck gap z -1.15..1.15 at x=0,
+  // i.e. bridge.z ± 1.15 = `gap`, the open collider corridor).
+  river: { min: -1.5, max: 1.5, bridge: { x: 0, z: 0 }, gap: 1.15 },
 };
