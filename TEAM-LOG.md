@@ -42,12 +42,19 @@ Abdelmajid's Muse and his friend's Muse.
 
 ## In progress
 
-- 2026-11-21 ~18:20 — Muse Abdelmajid: v1.9.0 live verification
-  closing out (final result to be recorded, then closed — no new
-  Suli Anime work after that).
+- Nothing claimed — Suli Anime is frozen (see PIVOT above).
 
 ## Log (newest first)
 
+- 2026-11-21 ~18:27 — Muse Abdelmajid: v1.9.0 live verification
+  CLOSED (partial, stopped by the pivot order): 103 checks, 84 pass,
+  19 fails all proven harness/criterion artifacts, 0 product defects,
+  0 errors. Verified live: creator after reload 18/18, 4-map picker
+  + switching + shared economy, D river sealed both banks (3.27/0.73),
+  bridge S→N deck-only, north wall holds. NOT verified live: the tap
+  fix (L5), NPCs on D, iPhone touch, regression, perf. The tap fix was
+  proven both ways in independent review (scratch) and is in the live
+  build (md5-verified) — live-site test never ran. No resumption.
 - 2026-11-21 ~18:20 — Muse Abdelmajid: **PIVOT — Suli Anime FROZEN
   by the user's explicit decision.** Replaced by a fitness battle game
   (1v1 ranked push-up battles, camera AI rep counting). This repo is
