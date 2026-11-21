@@ -159,8 +159,9 @@
     <!-- ===== 2. VILLAGE ===== -->
     <section class="screen" id="screen-village">
       <div class="vp" id="villageVp">
-        <span class="ovl pill" id="villageTitle" style="top:12px;right:12px;font-size:14px">قرية ساكورا</span>
+        <span class="ovl pill" id="villageTitle" style="top:12px;left:50%;transform:translateX(-50%);font-size:14px">قرية ساكورا</span>
         <span class="ovl pill" style="top:12px;left:12px">لاعب واحد</span>
+        <div class="npc-bubble" id="npcBubble"></div>
         <div class="joy" id="joyVillage"><div class="knob" id="knobVillage"></div></div>
         <span class="hint pill">اسحب العصا للمشي • المس شخصية أو محلاً</span>
         <div class="load" id="villageLoad">
@@ -396,6 +397,13 @@
         <div style="padding:0 16px 14px">
           <button class="btn ghost" id="logoutBtn">تسجيل الخروج</button>
         </div>
+        <div style="padding:0 16px 14px">
+          <div class="card danger-zone">
+            <b>منطقة الخطر</b>
+            <p>حذف الحساب نهائي — يُمسح كل شيء من جهازك: حسابك، عملاتك، مخزونك، أصدقاؤك، محادثاتك، مظهر شخصيتك، إعجاباتك، واختيار الخريطة. لا يمكن التراجع عنه.</p>
+            <button class="btn danger" id="deleteAccountBtn">حذف الحساب</button>
+          </div>
+        </div>
         <p class="mut" style="font-size:12px;line-height:1.8;padding:0 16px">حسابك محفوظ على جهازك فقط، وكلمة السر مشفّرة — لا يوجد لعب جماعي بعد</p>
       </div>
     </section>
@@ -537,6 +545,30 @@
       </div>
       <div style="margin-top:18px"><button class="btn" id="editSave">حفظ بروفيلي</button></div>
       <div style="margin-top:9px"><button class="btn ghost" id="editReset">استعادة الافتراضي</button></div>
+    </div>
+  </div>
+
+  <!-- ===== v1.7: delete-account confirmation sheet (two-step, mandatory) ===== -->
+  <div class="scrim" id="deleteScrim"></div>
+  <div class="sheet" id="deleteSheet" role="dialog" aria-label="حذف الحساب">
+    <div class="sheet-grip"></div>
+    <button class="sheet-x" id="deleteClose" aria-label="إغلاق">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <div class="sheet-body">
+      <b style="font-size:18px;color:#C0392B">حذف الحساب نهائياً؟</b>
+      <p class="mut" style="font-size:13px;line-height:1.8;margin-top:8px">سيتم مسح كل شيء نهائياً من هذا الجهاز، ولا يمكن التراجع عنه:</p>
+      <div class="delete-list">
+        <span>حسابك واسم المستخدم وكلمة السر</span>
+        <span>عملاتك والمكافآت اليومية</span>
+        <span>مخزونك (الألوان والهدايا)</span>
+        <span>أصدقاؤك ومحادثاتك</span>
+        <span>مظهر شخصيتك وبروفيلك</span>
+        <span>إعجاباتك واختيار الخريطة</span>
+      </div>
+      <p style="font-size:13px;line-height:1.8;margin-top:12px;color:#C0392B;font-weight:800">بعد الحذف ستعود اللعبة كما كانت في أول مرة — شاشة إنشاء حساب جديد.</p>
+      <div style="margin-top:16px"><button class="btn danger" id="deleteConfirmBtn">حذف نهائي</button></div>
+      <div style="margin-top:9px"><button class="btn ghost" id="deleteCancelBtn">إلغاء — أبقِ حسابي</button></div>
     </div>
   </div>
 
