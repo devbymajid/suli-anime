@@ -1,4 +1,4 @@
-/* Suli Anime v1.3 — D1 «القرية اليابانية» visual language (from the v5 designs).
+/* Suli Anime v1.5 — D1 «القرية اليابانية» visual language (from the v5 designs).
    Mobile-first: the app fills the phone screen, capped at 780px on desktop. */
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%}
@@ -275,3 +275,35 @@ input[type=range].slider::-moz-range-thumb{width:22px;height:22px;border-radius:
   padding:10px 8px;font:inherit;font-size:13px;background:#FFFFFF;color:#3E2C22;
   outline:none;text-align:center}
 .chip-inputs input:focus{border-color:#D96C8A}
+
+/* ---------- v1.5: shops + gifts + map picker ---------- */
+.shop-item{display:flex;align-items:center;gap:11px;background:#FFFFFF;
+  border:1px solid #EADFC6;border-radius:14px;padding:11px 13px;
+  box-shadow:0 2px 10px rgba(90,60,30,.08)}
+.shop-sw{width:42px;height:42px;border-radius:12px;flex:none;color:#fff;
+  display:flex;align-items:center;justify-content:center}
+.shop-id{flex:1;min-width:0}
+.shop-id b{font-size:14px;display:block}
+.shop-id span{font-size:11px;font-weight:700;color:#8A7A6B;display:block;line-height:1.6}
+.shop-owned{color:#5E9A6A !important}
+.shop-buy{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:none}
+.shop-price{font-size:12px;font-weight:800;color:#D96C8A;white-space:nowrap}
+.shop-btn{border:1.5px solid #D96C8A;background:#D96C8A;color:#fff;border-radius:10px;
+  padding:6px 12px;font-family:inherit;font-size:12px;font-weight:800;cursor:pointer;
+  white-space:nowrap}
+.shop-btn:active{transform:scale(.97)}
+.shop-btn.sell{background:#FFF8EC;color:#8A7A6B;border-color:#EADFC6}
+.gift-chip{display:inline-flex;align-items:center;gap:7px;background:#FFFFFF;
+  border:1.5px solid #EADFC6;border-radius:999px;padding:8px 12px;
+  font-family:inherit;font-size:13px;font-weight:700;color:#3E2C22;cursor:pointer}
+.gift-chip:active{transform:scale(.97)}
+.gift-chip b{color:#D96C8A}
+.gift-dot{width:14px;height:14px;border-radius:50%;flex:none;border:1px solid #EADFC6}
+.map-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  background:#FFFFFF;border:2px solid #EADFC6;border-radius:14px;padding:14px 16px;
+  font-family:inherit;font-size:15px;font-weight:800;color:#3E2C22;cursor:pointer;
+  text-align:right;width:100%}
+.map-row:active{transform:scale(.98)}
+.map-row.on{border-color:#D96C8A}
+.map-tick{font-size:12px;font-weight:800;color:#D96C8A;flex:none}
+.map-tick.mut{color:#8A7A6B}
