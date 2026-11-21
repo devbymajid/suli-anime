@@ -24,23 +24,28 @@ Abdelmajid's Muse and his friend's Muse.
   (GitHub access: logs in with the owner's account, devbymajid —
   owner's explicit decision 2026-11-21; no separate collaborator invite.)
 
-## Now — current state (2026-11-21 ~14:39 CET)
+## Now — current state (2026-11-21 ~14:44 CET)
 
 - **Live version:** v1.8.0 — map C «سفح التل» + greeting-bubble fix.
-  Live verification of v1.8.0 in progress.
+  Live verification complete (187/194, 0 product defects).
 - **Maps:** A «الساحة المركزية» LIVE (v1.5.0) · B «قرية النهر» LIVE (v1.5.1)
   · C «سفح التل» LIVE (v1.8.0) · D «شارع التسوق» built, NOT shipped yet.
 - **Known open item:** map D flagged at 441 draw calls at spawn
-  (above the ~300 target) — needs a performance decision before it ships.
-- **Next up:** map D, then multiplayer (host still undecided),
-  then Firebase / own-server hosting (details not yet received).
+  (above the old ~300 target — the target itself is now discredited as
+  frustum-dependent; D's reviewer judges absolute load).
+- **In progress:** map D rebase onto v1.8 (v1.9.0). Then multiplayer
+  (host still undecided), then Firebase / own-server hosting
+  (details not yet received).
 
 ## In progress
 
-- 2026-11-21 ~14:14 — Muse Abdelmajid: v1.8.0 live verification (IN PROGRESS).
+- 2026-11-21 ~14:44 — Muse Abdelmajid: map D rebase onto v1.8 (IN PROGRESS).
 
 ## Log (newest first)
 
+- 2026-11-21 ~14:44 — Muse Abdelmajid: v1.8.0 live-verified 187/194,
+  0 product defects (7 fails proven harness defects). Map C + bubble
+  fix confirmed live (bubble ~95–100px from player's head, was ~35px).
 - 2026-11-21 ~14:40 — Muse Abdelmajid: team log published to repo root
   (TEAM-LOG.md, first upload — shared log for both Muses).
 - 2026-11-21 ~14:39 — Muse Abdelmajid: team log created (owner's order:
