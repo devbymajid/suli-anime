@@ -38,10 +38,11 @@ import { buildCharacter, fitHeight, buildArticulatedFemale, tintArticulated } fr
 import { PROFILES, getProfile, saveProfileOverride, resetProfileOverride } from './profiles.js';
 import { getAppearance, getStoredAppearance, saveAppearance, diffAppearance, tintVRM } from './appearance.js';
 import { accountStore, validateSignup } from './account.js';
-// v1.5: map modules — one import per shipped map (A + B + C in 1.8.0).
+// v1.5: map modules — one import per shipped map (A + B + C + D in 1.9.0).
 import { MAP as MAP_A } from './map-a.js';
 import { MAP as MAP_B } from './map-b.js';
 import { MAP as MAP_C } from './map-c.js';
+import { MAP as MAP_D } from './map-d.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -177,7 +178,7 @@ const homeScreen = (() => {
 // reads env/bounds/start/title from the selected entry, and the picker
 // (mapUI) renders MAPS as-is. The selection persists in localStorage
 // ('suli-map'); an unknown stored id falls back to the first map.
-const MAPS = [MAP_A, MAP_B, MAP_C];
+const MAPS = [MAP_A, MAP_B, MAP_C, MAP_D];
 const MAP_KEY = 'suli-map';
 function selectedMapId() {
   try {
@@ -228,7 +229,26 @@ function makeWalkScreen(opts) {
   function pickShop(nx, ny) {
     if (!shops || !shops.length) return false;
     npcRay.setFromCamera({ x: nx, y: ny }, camera);
-    const hits = npcRay.intersectObjects(shops.map((s) => s.group), true);
+    // v1.9 FIX (parent, found by the v1.9.0 builder): skip any shop whose
+    // invisible hit cylinder CONTAINS the camera. A ray cast from inside
+    // the cylinder exits through its far wall and registers a hit, so a
+    // tap on open ground beyond the shop opened the shop instead of
+    // moving the player (on D the shops sit 3.6 from the street centre
+    // and the camera 3.4 behind the player, so standing mid-street facing
+    // sideways puts the camera inside a shop's cylinder). The cylinder is
+    // radius 1.3 x group scale, y 0..3.4 x scale (all four map modules);
+    // the camera sits at y 2.7, inside that band. pickNPC needs no such
+    // guard: NPC cylinders top out at y 1.9, below the camera.
+    const live = shops.filter((s) => {
+      const p = s.group.position;
+      const sc = s.group.scale.x || 1;
+      const dx = camera.position.x - p.x, dz = camera.position.z - p.z;
+      const inside = Math.hypot(dx, dz) < 1.3 * sc
+        && camera.position.y >= 0 && camera.position.y <= 3.4 * sc;
+      return !inside;
+    });
+    if (!live.length) return false;
+    const hits = npcRay.intersectObjects(live.map((s) => s.group), true);
     if (!hits.length) return false;
     let o = hits[0].object;
     while (o && !o.userData.shopId) o = o.parent;
@@ -1874,8 +1894,8 @@ const socialUI = (() => {
 })();
 
 // ================= MAP PICKER (v1.5) =================
-// Lists the maps in the registry (MAPS) — A + B + C in 1.8.0; D appears
-// here automatically once registered. Switching saves 'suli-map' and
+// Lists the maps in the registry (MAPS) — A + B + C + D in 1.9.0 (all four).
+// Switching saves 'suli-map' and
 // reloads (same pattern as the quality setting: the village screen is
 // built once per load from the selected map). Choosing the current map
 // just closes the sheet.
@@ -2173,7 +2193,7 @@ const screens = {
 let current = 'home';
 
 window.__suli = {
-  version: '1.8.0',
+  version: '1.9.0',
   screen: 'home',
   ready: {},
   playerPos: (name) => {
