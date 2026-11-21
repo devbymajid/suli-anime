@@ -18,18 +18,62 @@
 // buy/sell/apply — plus gifts for NPCs (from the profile sheet) that raise
 // their like count. No player-to-player trading (needs multiplayer).
 // v1.5.1 ships maps A + B; the picker lists the maps in the registry.
+// v1.6 adds the ACCOUNT GATE (realistic world, phase 1): on first launch
+// the player creates their OWN account (name, username, password, age,
+// gender, appearance) before entering the world; on later visits they log
+// in. Age 18+ is enforced at signup — under 18 the account is not created
+// and entry is blocked. The player model follows the account's gender:
+// male = the Dero VRM (as before), female = the articulated code-built
+// avatar (characters-v4.js), driven by the same Player walk class.
+// Passwords are SHA-256 hashed (account.js) — never stored in plaintext.
+// No sexual content anywhere: this is a clean social world for adults.
 import * as THREE from 'three';
 import { loadVRM, poseVRM, fitVRM, baseRenderer, shadowDisc, buildCreatorEnv, buildHomeEnv, storedQuality, setStoredQuality, resolveQuality } from './env.js';
 import { Player, FollowCamera, FixedCamera, createInput } from './player.js';
-import { buildCharacter, fitHeight } from './characters-v4.js';
+import { buildCharacter, fitHeight, buildArticulatedFemale, tintArticulated } from './characters-v4.js';
 import { PROFILES, getProfile, saveProfileOverride, resetProfileOverride } from './profiles.js';
 import { getAppearance, getStoredAppearance, saveAppearance, diffAppearance, tintVRM } from './appearance.js';
+import { accountStore, validateSignup } from './account.js';
 // v1.5: map modules — one import per shipped map (A + B in 1.5.1).
 import { MAP as MAP_A } from './map-a.js';
 import { MAP as MAP_B } from './map-b.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
+
+// ---------- v1.6: player model selection (by account gender) ----------
+// Male = the Dero VRM (as before); female = the articulated code-built
+// avatar (characters-v4.js), which the Player walk class drives
+// unchanged (same bone names, same -Z forward). The 'kaito' appearance
+// slot is the PLAYER slot regardless of gender (kept for save
+// compatibility). Screens that need a model only init after enterWorld(),
+// so an account always exists by then; 'm' is the pre-login fallback.
+function playerGender() {
+  const a = accountStore.get();
+  return a ? a.gender : 'm';
+}
+// Loads the player model ready to place: VRM = posed + fitted + tinted
+// (as before); female avatar = built with the saved colors + fitted.
+async function buildPlayerModel(targetHeight, groundY) {
+  if (playerGender() === 'f') {
+    const av = buildArticulatedFemale(getAppearance('kaito'));
+    fitHeight(av, targetHeight, groundY);
+    return av;
+  }
+  const av = await loadVRM('dero.vrm');
+  poseVRM(av);
+  fitVRM(av, targetHeight, groundY);
+  tintVRM(av, getStoredAppearance('kaito'));
+  return av;
+}
+// Re-tint the live player model with the SAVED appearance (after a shop
+// theme is applied). VRM: tintVRM with stored overrides only (the VRM
+// textures carry color). Female avatar: tintArticulated with the merged
+// colors (its materials ARE the colors — no texture to preserve).
+function tintPlayerModel(model) {
+  if (playerGender() === 'f') tintArticulated(model, getAppearance('kaito'));
+  else tintVRM(model, getStoredAppearance('kaito'));
+}
 
 // ---------- toast ----------
 let toastTimer = null;
@@ -87,14 +131,12 @@ const homeScreen = (() => {
       camera.position.set(0.25, 1.35, 2.9);
       camera.lookAt(0, 1.05, 0);
       try {
-        model = await loadVRM('dero.vrm');
+        model = await buildPlayerModel(1.6, 0.22); // v1.6: VRM (male) or articulated avatar (female)
       } catch (e) {
         loadError($('#homeLoad'), () => { initPromise = null; init().then(() => homeScreen.start()).catch(() => {}); });
         throw e;
       }
-      poseVRM(model);
-      fitVRM(model, 1.6, 0.22);
-      tintVRM(model, getStoredAppearance('kaito')); // v1.3: saved colors
+      // v1.6: buildPlayerModel already posed + fitted + tinted the model
       model.rotation.y = Math.PI - 0.45;
       scene.add(model);
       $('#homeLoad').classList.add('hidden');
@@ -205,14 +247,12 @@ function makeWalkScreen(opts) {
       if (envHandles.stats) envStats = envHandles.stats;
       camera = new THREE.PerspectiveCamera(opts.fov || 46, w / h, 0.1, 80);
       try {
-        av = await loadVRM('dero.vrm');
+        av = await buildPlayerModel(1.45, 0); // v1.6: VRM (male) or articulated avatar (female)
       } catch (e) {
         loadError($(opts.load), () => { initPromise = null; init().then(() => api.start()).catch(() => {}); });
         throw e;
       }
-      poseVRM(av);
-      fitVRM(av, 1.45, 0);
-      tintVRM(av, getStoredAppearance('kaito')); // v1.3: saved colors
+      // v1.6: buildPlayerModel already posed + fitted + tinted the model
       // v1.4.1: the player casts a real shadow on high quality (opaque
       // meshes only — a transparent mesh would cast a solid blob).
       av.traverse((o) => { if (o.isMesh && !(o.material && o.material.transparent)) o.castShadow = true; });
@@ -403,11 +443,12 @@ function makeWalkScreen(opts) {
         visible: v.z < 1 && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1,
       };
     },
-    // v1.5: re-tint the player VRM with the SAVED appearance (after a shop
-    // theme is applied) so the new colors show without a reload.
+    // v1.5: re-tint the player model with the SAVED appearance (after a
+    // shop theme is applied) so the new colors show without a reload.
+    // v1.6: branches on gender (VRM tint vs articulated-avatar tint).
     applyAppearance() {
       if (!ready || !av) return;
-      tintVRM(av, getStoredAppearance('kaito'));
+      tintPlayerModel(av);
     },
   };
   return api;
@@ -471,13 +512,20 @@ const creatorScreen = (() => {
     state.char = key;
     if (currentModel) { group.remove(currentModel); currentModel = null; }
     if (key === 'kaito') {
-      if (!kaitoModel) {
-        kaitoModel = await loadVRM('dero.vrm');
-        poseVRM(kaitoModel);
-        fitVRM(kaitoModel, 1.55, 0.22);
+      // v1.6: the player card shows the PLAYER's model — the VRM for a
+      // male account, the articulated female avatar for a female account.
+      if (playerGender() === 'f') {
+        currentModel = buildArticulatedFemale(appOverride || getAppearance('kaito'));
+        fitHeight(currentModel, 1.55, 0.22);
+      } else {
+        if (!kaitoModel) {
+          kaitoModel = await loadVRM('dero.vrm');
+          poseVRM(kaitoModel);
+          fitVRM(kaitoModel, 1.55, 0.22);
+        }
+        currentModel = kaitoModel;
+        tintVRM(currentModel, appOverride ? diffAppearance(key, appOverride) : getStoredAppearance(key));
       }
-      currentModel = kaitoModel;
-      tintVRM(currentModel, appOverride ? diffAppearance(key, appOverride) : getStoredAppearance(key));
     } else {
       currentModel = buildCharacter(key, appOverride || getAppearance(key));
       fitHeight(currentModel, 1.55, 0.22);
@@ -573,10 +621,17 @@ const creatorScreen = (() => {
     if (w < 10 || h < 10) return;
     const r = baseRenderer(el, w, h, true);
     const sc = new THREE.Scene();
-    const av = await loadVRM('dero.vrm');
-    poseVRM(av);
-    fitVRM(av, 1.5, 0);
-    tintVRM(av, getStoredAppearance('kaito')); // v1.3: saved colors
+    // v1.6: the player thumb follows the account's gender too
+    let av;
+    if (playerGender() === 'f') {
+      av = buildArticulatedFemale(getAppearance('kaito'));
+      fitHeight(av, 1.5, 0);
+    } else {
+      av = await loadVRM('dero.vrm');
+      poseVRM(av);
+      fitVRM(av, 1.5, 0);
+      tintVRM(av, getStoredAppearance('kaito')); // v1.3: saved colors
+    }
     av.rotation.y = Math.PI - 0.25;
     sc.add(av);
     sc.updateMatrixWorld(true);
@@ -769,12 +824,26 @@ const creatorScreen = (() => {
     },
     wireUI,
     getState() { return state; },
+    // v1.6: sync the creator's name + gender with the account (called on
+    // login/signup). Only when the player card is selected — the other
+    // cards keep their own character's name and gender.
+    setPlayerName(name, gender) {
+      if (state.char !== 'kaito') return;
+      state.name = name;
+      const input = $('#charName');
+      if (input) input.value = name;
+      if (gender) {
+        state.gender = gender;
+        $$('#genderSeg div').forEach((d) => d.classList.toggle('on', d.dataset.g === gender));
+      }
+    },
     // v1.3 test hook: the colors the current preview model shows.
     // Kaito (VRM): the tinted material colors. Code-built characters:
-    // the colors the rebuild used (see appliedAppearance).
+    // the colors the rebuild used (see appliedAppearance). v1.6: the
+    // female player avatar is code-built too, so it takes the same path.
     debugMaterials() {
       if (!currentModel) return null;
-      if (currentChar !== 'kaito') {
+      if (currentChar !== 'kaito' || playerGender() === 'f') {
         const a = currentModel.userData.appliedAppearance;
         return a ? { hair: a.haircolor, skin: a.skin, eye: a.eyecolor, outfit: a.outfitcolor } : null;
       }
@@ -833,7 +902,7 @@ const shopUI = (() => {
     'gift-candy':   { id: 'gift-candy',   name: 'حلوى ساكورا',       desc: 'هدية صغيرة ولذيذة',       price: 30,  kind: 'gift', color: '#f8b8d0', fav: null,    shop: 'farm' },
   };
   const SHOPS = {
-    fashion: { id: 'fashion', name: 'متجر الأزياء', desc: 'ألوان أزياء حصرية — اشترِها وطبّقها على كايتو، أو اخترها لاحقاً من المنشئ.', items: ['theme-gold', 'theme-violet', 'theme-teal'] },
+    fashion: { id: 'fashion', name: 'متجر الأزياء', desc: 'ألوان أزياء حصرية — اشترِها وطبّقها على شخصيتك، أو اخترها لاحقاً من المنشئ.', items: ['theme-gold', 'theme-violet', 'theme-teal'] },
     colors:  { id: 'colors',  name: 'متجر الألوان', desc: 'ألوان شعر حصرية لا توجد في المنشئ — اشترِها وطبّقها أو اخترها من المنشئ.', items: ['hair-gold', 'hair-violet', 'hair-teal'] },
     gifts:   { id: 'gifts',   name: 'متجر الهدايا', desc: 'هدايا لسكان القرية — أهدِها من بروفايل الشخصية ليرتفع إعجابها بك.', items: ['gift-cake', 'gift-ball', 'gift-brush', 'gift-bouquet'] },
     farm:    { id: 'farm',    name: 'سوق المزارع',  desc: 'من منتجات القرية: فواكه وعسل وشاي — كلها هدايا مناسبة لأي شخصية.', items: ['gift-apple', 'gift-honey', 'gift-tea', 'gift-candy'] },
@@ -963,7 +1032,7 @@ const shopUI = (() => {
     villageScreen.applyAppearance();
     roomScreen.applyAppearance();
     renderShop(currentShop);
-    toast('تم تطبيق ' + it.name + ' على كايتو');
+    toast('تم تطبيق ' + it.name + ' على ' + getProfile('kaito').name); // v1.6: the player's own name, not «كايتو»
   }
 
   // ---- gifts (given from the NPC profile sheet) ----
@@ -1472,6 +1541,188 @@ const mapUI = (() => {
   return { wire, openSheet, closeSheet };
 })();
 
+// ================= ACCOUNT GATE (v1.6) =================
+// First launch = signup (name, username, password, age, gender,
+// appearance). Later visits = login (username + password). The gate is
+// the ONLY entry: the top bar and bottom nav are hidden (body.gated)
+// until enterWorld(), and show() redirects any other navigation to the
+// gate while logged out. The 18+ age check runs on signup submit —
+// under 18 no account is created and there is no way into the world.
+// Passwords are SHA-256 hashed inside accountStore (never plaintext).
+// FOLLOW-UP (not in v1.6): "forgot password" / account recovery.
+const accountUI = (() => {
+  let gender = 'm';
+  let haircolor = '#4a2c2a', skin = '#ffd9b3', outfitcolor = '#f5f5f5';
+
+  function showError(el, msg) {
+    if (!el) return;
+    el.textContent = msg || '';
+    el.style.display = msg ? 'block' : 'none';
+  }
+  function showAgeBlock(show) {
+    const b = $('#suAgeBlock');
+    if (b) b.style.display = show ? 'block' : 'none';
+  }
+
+  async function submitSignup() {
+    showError($('#suError'), '');
+    showAgeBlock(false);
+    const f = {
+      name: $('#suName').value,
+      username: $('#suUser').value,
+      password: $('#suPass').value,
+      age: $('#suAge').value,
+      gender,
+    };
+    const pre = validateSignup(f);
+    if (pre === 'AGE_BLOCK') {
+      // the 18+ gate: no account, no entry — the banner stays until the
+      // age is corrected (the form is NOT cleared, so a typo is fixable);
+      // scroll to the top so the banner itself is seen
+      showAgeBlock(true);
+      const sc = document.querySelector('#screen-signup .scroll');
+      if (sc) sc.scrollTop = 0;
+      showError($('#suError'), 'هاد اللعبة للبالغين فقط (18+)');
+      return;
+    }
+    if (pre) { showError($('#suError'), pre); return; }
+    const btn = $('#suSubmit');
+    btn.disabled = true;
+    btn.textContent = 'جارٍ إنشاء الحساب...';
+    try {
+      const res = await accountStore.create(f);
+      if (!res.ok) {
+        if (res.error === 'AGE_BLOCK') { showAgeBlock(true); showError($('#suError'), 'هاد اللعبة للبالغين فقط (18+)'); }
+        else showError($('#suError'), res.error);
+        return;
+      }
+      // the signup appearance goes into the PLAYER slot ('kaito')
+      saveAppearance('kaito', { haircolor, skin, eyecolor: '#4a2c2a', outfitcolor });
+      // the account name becomes the character's display name everywhere
+      // (profile, creator, home hero) — the v1.3 identity sync
+      saveProfileOverride('kaito', { name: res.account.name });
+      try {
+        const raw = localStorage.getItem('suli-character');
+        const st = raw ? JSON.parse(raw) : {};
+        st.name = res.account.name;
+        st.gender = gender;
+        localStorage.setItem('suli-character', JSON.stringify(st));
+      } catch (e) {}
+      enterWorld();
+      toast('أهلاً بك في سولي، ' + res.account.name);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'ابدأ اللعب';
+    }
+  }
+
+  async function submitLogin() {
+    showError($('#liError'), '');
+    const btn = $('#liSubmit');
+    btn.disabled = true;
+    btn.textContent = 'جارٍ الدخول...';
+    try {
+      const res = await accountStore.verify($('#liUser').value, $('#liPass').value);
+      if (!res.ok) {
+        showError($('#liError'), res.error === 'NO_ACCOUNT'
+          ? 'لا يوجد حساب على هذا الجهاز — أنشئ حساباً أولاً'
+          : 'اسم المستخدم أو كلمة السر غير صحيحة');
+        return;
+      }
+      enterWorld();
+      toast('أهلاً بعودتك، ' + res.account.name);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'دخول';
+    }
+  }
+
+  function wire() {
+    // gender seg
+    $$('#suGenderSeg div').forEach((d) => d.addEventListener('click', () => {
+      $$('#suGenderSeg div').forEach((x) => x.classList.toggle('on', x === d));
+      gender = d.dataset.g;
+    }));
+    // appearance dots (same colors as the creator)
+    $$('[data-su-group]').forEach((g) => {
+      const name = g.dataset.suGroup;
+      g.addEventListener('click', (e) => {
+        const dot = e.target.closest('.dot');
+        if (!dot || !g.contains(dot)) return;
+        g.querySelectorAll('.dot').forEach((o) => o.classList.remove('on'));
+        dot.classList.add('on');
+        if (name === 'haircolor') haircolor = dot.dataset.v;
+        else if (name === 'skin') skin = dot.dataset.v;
+        else if (name === 'outfitcolor') outfitcolor = dot.dataset.v;
+      });
+    });
+    $('#suSubmit').addEventListener('click', submitSignup);
+    $('#liSubmit').addEventListener('click', submitLogin);
+    $('#suToLogin').addEventListener('click', () => show('login'));
+    $('#liToSignup').addEventListener('click', () => show('signup'));
+    // Enter submits the form
+    ['#suName', '#suUser', '#suPass', '#suAge'].forEach((sel) => {
+      const el = $(sel);
+      if (el) el.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitSignup(); });
+    });
+    ['#liUser', '#liPass'].forEach((sel) => {
+      const el = $(sel);
+      if (el) el.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitLogin(); });
+    });
+    // correcting the age hides the block banner again
+    const ageEl = $('#suAge');
+    if (ageEl) ageEl.addEventListener('input', () => showAgeBlock(false));
+    // logout (account screen): end the session and reload so no 3D screen
+    // keeps a stale model — after the reload the gate shows the login
+    // screen (the account still exists on this device).
+    const lo = $('#logoutBtn');
+    if (lo) lo.addEventListener('click', () => {
+      accountStore.endSession();
+      window.location.reload();
+    });
+  }
+
+  return { wire, submitSignup, submitLogin };
+})();
+
+// v1.6: push the account's identity into every place that shows the
+// player (home hero, account card, room title, creator name + player
+// card label). Called on enterWorld() and on every account-screen visit
+// (so the account card stays authoritative over the v1.3 profile sync).
+function applyAccountIdentity() {
+  const acc = accountStore.get();
+  if (!acc) return;
+  const heroName = $('#screen-home .name b');
+  if (heroName) heroName.textContent = acc.name;
+  const accName = $('#accName');
+  if (accName) accName.textContent = acc.name;
+  const u = $('#accUsername');
+  if (u) u.textContent = '@' + acc.username;
+  const ag = $('#accAge');
+  if (ag) ag.textContent = acc.age + ' سنة';
+  const g = $('#accGender');
+  if (g) g.textContent = acc.gender === 'f' ? 'أنثى' : 'ذكر';
+  const roomTitle = $('#roomTitle');
+  if (roomTitle) roomTitle.textContent = 'منزل ' + acc.name;
+  const pickLabel = document.querySelector('.pick[data-char="kaito"] b');
+  if (pickLabel) pickLabel.textContent = acc.name;
+  creatorScreen.setPlayerName(acc.name, acc.gender);
+}
+
+// v1.6: the single entry into the world — called on signup success,
+// login success, and at boot when a session already exists. Ungates the
+// UI, applies the account identity, grants the daily bonus (moved here
+// from boot: it must not fire before login), then shows home (or inits
+// it directly when home is already the current screen, i.e. a logged-in
+// boot — show('home') would early-return in that case).
+function enterWorld() {
+  document.body.classList.remove('gated');
+  applyAccountIdentity();
+  shopUI.dailyBonus();
+  if (current !== 'home') { show('home'); return; }
+  homeScreen.init().then(() => homeScreen.start()).catch(() => {});
+}
+
 // ================= SCREEN MANAGER =================
 const screens = {
   home: homeScreen,
@@ -1480,11 +1731,13 @@ const screens = {
   creator: creatorScreen,
   cinema: null, // static shell
   account: null, // static shell
+  signup: null, // v1.6: static shell (account gate)
+  login: null, // v1.6: static shell (account gate)
 };
 let current = 'home';
 
 window.__suli = {
-  version: '1.5.1',
+  version: '1.6.0',
   screen: 'home',
   ready: {},
   playerPos: (name) => {
@@ -1507,9 +1760,22 @@ window.__suli = {
   openShop: (id) => shopUI.openShop(id), // v1.5: open a shop sheet directly
   map: () => ({ id: ACTIVE_MAP.id, name: ACTIVE_MAP.name }), // v1.5: selected map
   maps: () => MAPS.map((m) => ({ id: m.id, name: m.name })), // v1.5: registry
+  // v1.6: account hooks — account() NEVER exposes the password hash
+  account: () => {
+    const a = accountStore.get();
+    return a ? { name: a.name, username: a.username, age: a.age, gender: a.gender } : null;
+  },
+  isLoggedIn: () => accountStore.isLoggedIn(), // v1.6: session active?
+  playerGender: () => playerGender(), // v1.6: 'm' | 'f'
+  logout: () => { accountStore.endSession(); window.location.reload(); }, // v1.6 test hook
 };
 
 async function show(name) {
+  // v1.6: the gate — until the player is logged in, only the signup and
+  // login screens exist; any other navigation is redirected to the gate.
+  if (!accountStore.isLoggedIn() && name !== 'signup' && name !== 'login') {
+    name = accountStore.exists() ? 'login' : 'signup';
+  }
   if (current === name) return;
   // v1.2: leaving a screen closes any open sheet/chat (their scrim/overlay
   // would otherwise cover the new screen)
@@ -1524,7 +1790,7 @@ async function show(name) {
   $$('.screen').forEach((s) => s.classList.toggle('on', s.id === 'screen-' + name));
   $$('#bottomNav .it').forEach((b) => b.classList.toggle('on', b.dataset.screen === name));
   $('#topBack').style.display = name === 'creator' ? 'flex' : 'none';
-  if (name === 'account') { socialUI.renderFriends(); socialUI.renderMyProfile(); }
+  if (name === 'account') { socialUI.renderFriends(); socialUI.renderMyProfile(); applyAccountIdentity(); }
   const sc = screens[name];
   if (sc) {
     try { await sc.init(); } catch (e) { /* load overlay shows the error + retry */ }
@@ -1543,10 +1809,21 @@ window.addEventListener('resize', () => {
   if (sc) sc.resize();
 });
 
-// boot: home screen first
+// boot: v1.6 — the account gate comes first. No 3D screen inits until
+// the player is logged in (the home hero needs the account's gender,
+// and the world must not load before the 18+ gate passes). The daily
+// bonus now fires inside enterWorld(), not here.
+//   - logged-in session  -> straight into the world (home)
+//   - account, no session -> login screen
+//   - no account          -> signup screen (first launch)
 creatorScreen.wireUI();
 socialUI.wire();
 shopUI.wire(); // v1.5: shop sheet + live coin balance
-shopUI.dailyBonus(); // v1.5: +100 coins once per day (toast when granted)
 mapUI.wire(); // v1.5: map picker (home entry + sheet)
-homeScreen.init().then(() => homeScreen.start()).catch(() => {});
+accountUI.wire(); // v1.6: signup / login / logout
+if (accountStore.isLoggedIn()) {
+  enterWorld();
+} else {
+  document.body.classList.add('gated');
+  if (accountStore.exists()) show('login'); else show('signup');
+}
