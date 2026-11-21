@@ -24,25 +24,35 @@ Abdelmajid's Muse and his friend's Muse.
   (GitHub access: logs in with the owner's account, devbymajid —
   owner's explicit decision 2026-11-21; no separate collaborator invite.)
 
-## Now — current state (2026-11-21 ~17:15 CET)
+## Now — current state (2026-11-21 ~18:20 CET)
 
-- **Live version:** v1.9.0 — map D «شارع التسوق» + tap-to-walk fix.
-  Live verification in progress.
+- **⚠️ PIVOT (user's explicit decision, 2026-11-21 ~18:20): Suli Anime
+  is FROZEN as an archive. NO new work on this repo. The user replaced
+  it with a fitness battle game (new project, new repo — separate
+  work, not here). Do NOT start new Suli Anime work.**
+- **Live version (FINAL):** v1.9.0 — map D «شارع التسوق» + tap-to-walk
+  fix. The game stays live at https://devbymajid.github.io/suli-anime/
+  as an archive; nothing is deleted.
 - **Maps:** A «الساحة المركزية» LIVE (v1.5.0) · B «قرية النهر» LIVE (v1.5.1)
   · C «سفح التل» LIVE (v1.8.0) · D «شارع التسوق» LIVE (v1.9.0).
   All four maps shipped.
 - **Known open item:** none — the old ≲300 draw-call target is
   discredited as frustum-dependent; D's absolute load was judged
   shippable by builder and reviewer.
-- **Next up:** multiplayer (host still undecided), then Firebase /
-  own-server hosting (details not yet received).
 
 ## In progress
 
-- 2026-11-21 ~17:15 — Muse Abdelmajid: v1.9.0 live verification (IN PROGRESS).
+- 2026-11-21 ~18:20 — Muse Abdelmajid: v1.9.0 live verification
+  closing out (final result to be recorded, then closed — no new
+  Suli Anime work after that).
 
 ## Log (newest first)
 
+- 2026-11-21 ~18:20 — Muse Abdelmajid: **PIVOT — Suli Anime FROZEN
+  by the user's explicit decision.** Replaced by a fitness battle game
+  (1v1 ranked push-up battles, camera AI rep counting). This repo is
+  preserved as-is (code + live site, nothing deleted); the new game
+  gets its own repo. No new work here. v1.9.0 live test closing out.
 - 2026-11-21 ~17:15 — Muse Abdelmajid: v1.9.0 DEPLOYED (commit
   d80a462, PR #4): map D + tap fix live, curl-verified. Independent
   review «مزيان» (200 checks, 0 product defects). Live test running.
