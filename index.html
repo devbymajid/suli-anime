@@ -24,13 +24,111 @@
 
   <div class="screens">
 
+    <!-- ===== 0a. SIGNUP (v1.6: first launch — account gate) ===== -->
+    <section class="screen" id="screen-signup">
+      <div class="scroll">
+        <div class="auth">
+          <div class="auth-logo" dir="ltr">Suli Anime</div>
+          <b class="auth-title">أنشئ حسابك</b>
+          <p class="mut auth-sub">صمّم شخصيتك وعِش في القرية كما تريد — اللعبة للبالغين فقط (18+)</p>
+          <div class="auth-block" id="suAgeBlock" style="display:none">
+            <b>هاد اللعبة للبالغين فقط (18+)</b>
+            <span>عذراً — سولي أنمي للبالغين فقط، ولا يمكن إنشاء حساب قبل سن 18.</span>
+          </div>
+          <div class="field">
+            <label>الاسم</label>
+            <input id="suName" type="text" maxlength="20" autocomplete="off" placeholder="اسمك في اللعبة">
+          </div>
+          <div class="field">
+            <label>اسم المستخدم</label>
+            <input id="suUser" type="text" maxlength="20" autocomplete="off" placeholder="بدون مسافات">
+          </div>
+          <div class="field">
+            <label>كلمة السر</label>
+            <input id="suPass" type="password" autocomplete="new-password" placeholder="6 أحرف على الأقل">
+          </div>
+          <div class="field">
+            <label>العمر</label>
+            <input id="suAge" type="number" inputmode="numeric" min="1" max="120" placeholder="مثال: 24">
+          </div>
+          <div class="field">
+            <label>الجنس</label>
+            <div class="seg" id="suGenderSeg"><div class="on" data-g="m">ذكر</div><div data-g="f">أنثى</div></div>
+          </div>
+          <div class="field">
+            <label>لون الشعر</label>
+            <span data-su-group="haircolor" style="display:flex;gap:11px;flex-wrap:wrap">
+              <span class="dot" data-v="#1f2937" style="background:#1f2937"></span>
+              <span class="dot on" data-v="#4a2c2a" style="background:#4a2c2a"></span>
+              <span class="dot" data-v="#6b4226" style="background:#6b4226"></span>
+              <span class="dot" data-v="#c0392b" style="background:#c0392b"></span>
+              <span class="dot" data-v="#4a3542" style="background:#4a3542"></span>
+              <span class="dot" data-v="#e8a33d" style="background:#e8a33d"></span>
+              <span class="dot" data-v="#b91c1c" style="background:#b91c1c"></span>
+              <span class="dot" data-v="#22d3ee" style="background:#22d3ee"></span>
+              <span class="dot" data-v="#f472b6" style="background:#f472b6"></span>
+            </span>
+          </div>
+          <div class="field">
+            <label>لون البشرة</label>
+            <span data-su-group="skin" style="display:flex;gap:11px;flex-wrap:wrap">
+              <span class="dot" data-v="#ffe3c2" style="background:#ffe3c2"></span>
+              <span class="dot on" data-v="#ffd9b3" style="background:#ffd9b3"></span>
+              <span class="dot" data-v="#f0c297" style="background:#f0c297"></span>
+              <span class="dot" data-v="#d9a06f" style="background:#d9a06f"></span>
+              <span class="dot" data-v="#b07d4f" style="background:#b07d4f"></span>
+              <span class="dot" data-v="#8a5a33" style="background:#8a5a33"></span>
+            </span>
+          </div>
+          <div class="field">
+            <label>لون الزي</label>
+            <span data-su-group="outfitcolor" style="display:flex;gap:11px;flex-wrap:wrap">
+              <span class="dot on" data-v="#f5f5f5" style="background:#f5f5f5"></span>
+              <span class="dot" data-v="#1e1e26" style="background:#1e1e26"></span>
+              <span class="dot" data-v="#2b2f3a" style="background:#2b2f3a"></span>
+              <span class="dot" data-v="#b91c1c" style="background:#b91c1c"></span>
+              <span class="dot" data-v="#2f7fc4" style="background:#2f7fc4"></span>
+              <span class="dot" data-v="#5e9a6a" style="background:#5e9a6a"></span>
+              <span class="dot" data-v="#f472b6" style="background:#f472b6"></span>
+            </span>
+          </div>
+          <p class="auth-err" id="suError" style="display:none"></p>
+          <div style="margin-top:18px"><button class="btn" id="suSubmit">ابدأ اللعب</button></div>
+          <button class="auth-link" id="suToLogin">لدي حساب؟ تسجيل الدخول</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 0b. LOGIN (v1.6: return visits) ===== -->
+    <section class="screen" id="screen-login">
+      <div class="scroll">
+        <div class="auth">
+          <div class="auth-logo" dir="ltr">Suli Anime</div>
+          <b class="auth-title">تسجيل الدخول</b>
+          <p class="mut auth-sub">أهلاً بعودتك إلى القرية</p>
+          <div class="field">
+            <label>اسم المستخدم</label>
+            <input id="liUser" type="text" maxlength="20" autocomplete="username" placeholder="اسم المستخدم">
+          </div>
+          <div class="field">
+            <label>كلمة السر</label>
+            <input id="liPass" type="password" autocomplete="current-password" placeholder="كلمة السر">
+          </div>
+          <p class="auth-err" id="liError" style="display:none"></p>
+          <div style="margin-top:18px"><button class="btn" id="liSubmit">دخول</button></div>
+          <button class="auth-link" id="liToSignup">ليس لديك حساب؟ إنشاء حساب جديد</button>
+          <p class="mut" style="font-size:12px;line-height:1.8;text-align:center;margin-top:10px">استرجاع كلمة السر غير متوفر بعد — سيتوفر قريباً</p>
+        </div>
+      </div>
+    </section>
+
     <!-- ===== 1. HOME ===== -->
     <section class="screen on" id="screen-home">
       <div class="hero vp" id="homeVp">
         <div class="name ovl"><b>كايتو</b><span>المستوى 5</span></div>
         <span class="ovl pill" style="top:12px;left:14px">أهلاً بك في سولي</span>
         <div class="load" id="homeLoad">
-          <div class="spin"></div><b>جارٍ تحميل كايتو</b>
+          <div class="spin"></div><b>جارٍ تحميل شخصيتك</b>
           <p>النموذج ثلاثي الأبعاد كبير قليلاً، لحظات فقط</p>
         </div>
       </div>
@@ -67,7 +165,7 @@
         <span class="hint pill">اسحب العصا للمشي • المس شخصية أو محلاً</span>
         <div class="load" id="villageLoad">
           <div class="spin"></div><b>جارٍ تحميل القرية</b>
-          <p>نبني البيوت والأشجار ونحضّر كايتو</p>
+          <p>نبني البيوت والأشجار ونحضّر شخصيتك</p>
         </div>
       </div>
     </section>
@@ -75,12 +173,12 @@
     <!-- ===== 3. HOME ROOM ===== -->
     <section class="screen" id="screen-room">
       <div class="vp" id="roomVp">
-        <span class="ovl pill" style="top:12px;right:12px;font-size:14px">منزل كايتو</span>
+        <span class="ovl pill" id="roomTitle" style="top:12px;right:12px;font-size:14px">منزل كايتو</span>
         <div class="joy" id="joyRoom"><div class="knob" id="knobRoom"></div></div>
         <span class="hint pill">اسحب العصا أو المس الأرض للمشي</span>
         <div class="load" id="roomLoad">
           <div class="spin"></div><b>جارٍ تحميل المنزل</b>
-          <p>نرتّب الغرفة ونحضّر كايتو</p>
+          <p>نرتّب الغرفة ونحضّر شخصيتك</p>
         </div>
       </div>
     </section>
@@ -260,6 +358,9 @@
         <div style="padding:8px 16px 0">
           <div class="card">
             <div class="stat"><span>اسم الشخصية</span><b id="accName">كايتو</b></div>
+            <div class="stat"><span>اسم المستخدم</span><b id="accUsername">—</b></div>
+            <div class="stat"><span>العمر</span><b id="accAge">—</b></div>
+            <div class="stat"><span>الجنس</span><b id="accGender">—</b></div>
             <div class="stat"><span>المستوى</span><b>5</b></div>
             <div class="stat"><span>العملات</span><b id="accCoins">1,250</b></div>
             <div class="stat"><span>الأصدقاء</span><b id="accFriendsCount">0</b></div>
@@ -292,7 +393,10 @@
         <div style="padding:14px 16px">
           <button class="btn ghost" id="accToCreator">تعديل شخصيتي</button>
         </div>
-        <p class="mut" style="font-size:12px;line-height:1.8;padding:0 16px">هذه النسخة الأولى تعمل من دون حساب حقيقي: بياناتك محفوظة على جهازك فقط، ولا يوجد لعب جماعي بعد</p>
+        <div style="padding:0 16px 14px">
+          <button class="btn ghost" id="logoutBtn">تسجيل الخروج</button>
+        </div>
+        <p class="mut" style="font-size:12px;line-height:1.8;padding:0 16px">حسابك محفوظ على جهازك فقط، وكلمة السر مشفّرة — لا يوجد لعب جماعي بعد</p>
       </div>
     </section>
 
