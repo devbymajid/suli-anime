@@ -17,15 +17,16 @@
 // the SHOP ECONOMY (shopUI): coins with a daily bonus, an inventory, and
 // buy/sell/apply — plus gifts for NPCs (from the profile sheet) that raise
 // their like count. No player-to-player trading (needs multiplayer).
-// v1.5.0 ships map A only; the picker lists the maps in the registry.
+// v1.5.1 ships maps A + B; the picker lists the maps in the registry.
 import * as THREE from 'three';
 import { loadVRM, poseVRM, fitVRM, baseRenderer, shadowDisc, buildCreatorEnv, buildHomeEnv, storedQuality, setStoredQuality, resolveQuality } from './env.js';
 import { Player, FollowCamera, FixedCamera, createInput } from './player.js';
 import { buildCharacter, fitHeight } from './characters-v4.js';
 import { PROFILES, getProfile, saveProfileOverride, resetProfileOverride } from './profiles.js';
 import { getAppearance, getStoredAppearance, saveAppearance, diffAppearance, tintVRM } from './appearance.js';
-// v1.5: map modules — one import per shipped map (A only in 1.5.0).
+// v1.5: map modules — one import per shipped map (A + B in 1.5.1).
 import { MAP as MAP_A } from './map-a.js';
+import { MAP as MAP_B } from './map-b.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -129,7 +130,7 @@ const homeScreen = (() => {
 // reads env/bounds/start/title from the selected entry, and the picker
 // (mapUI) renders MAPS as-is. The selection persists in localStorage
 // ('suli-map'); an unknown stored id falls back to the first map.
-const MAPS = [MAP_A];
+const MAPS = [MAP_A, MAP_B];
 const MAP_KEY = 'suli-map';
 function selectedMapId() {
   try {
@@ -1415,7 +1416,7 @@ const socialUI = (() => {
 })();
 
 // ================= MAP PICKER (v1.5) =================
-// Lists the maps in the registry (MAPS) — A only in 1.5.0; B/C/D appear
+// Lists the maps in the registry (MAPS) — A + B in 1.5.1; C/D appear
 // here automatically once registered. Switching saves 'suli-map' and
 // reloads (same pattern as the quality setting: the village screen is
 // built once per load from the selected map). Choosing the current map
@@ -1458,7 +1459,15 @@ const mapUI = (() => {
     const sub = $('#mapPickerSub');
     if (sub) sub.textContent = ACTIVE_MAP.name;
     const vt = $('#villageTitle');
-    if (vt) vt.textContent = ACTIVE_MAP.name;
+    if (vt) {
+      vt.textContent = ACTIVE_MAP.name;
+      // v1.5.1: the village pill also opens the picker (live-test finding:
+      // it was text-only in 1.5.0). Canvas input binds to the canvas
+      // element, so taps on this overlay pill never reach it — no
+      // accidental walk or camera drag.
+      vt.style.cursor = 'pointer';
+      vt.addEventListener('click', openSheet);
+    }
   }
   return { wire, openSheet, closeSheet };
 })();
@@ -1475,7 +1484,7 @@ const screens = {
 let current = 'home';
 
 window.__suli = {
-  version: '1.5.0',
+  version: '1.5.1',
   screen: 'home',
   ready: {},
   playerPos: (name) => {
