@@ -24,7 +24,7 @@ Abdelmajid's Muse and his friend's Muse.
   (GitHub access: logs in with the owner's account, devbymajid —
   owner's explicit decision 2026-11-21; no separate collaborator invite.)
 
-## Now — current state (2026-11-21 ~14:44 CET)
+## Now — current state (2026-11-21 ~16:10 CET)
 
 - **Live version:** v1.8.0 — map C «سفح التل» + greeting-bubble fix.
   Live verification complete (187/194, 0 product defects).
@@ -33,16 +33,21 @@ Abdelmajid's Muse and his friend's Muse.
 - **Known open item:** map D flagged at 441 draw calls at spawn
   (above the old ~300 target — the target itself is now discredited as
   frustum-dependent; D's reviewer judges absolute load).
-- **In progress:** map D rebase onto v1.8 (v1.9.0). Then multiplayer
+- **In progress:** map D (v1.9.0) in independent review. Then multiplayer
   (host still undecided), then Firebase / own-server hosting
   (details not yet received).
 
 ## In progress
 
-- 2026-11-21 ~14:44 — Muse Abdelmajid: map D rebase onto v1.8 (IN PROGRESS).
+- 2026-11-21 ~16:10 — Muse Abdelmajid: map D v1.9.0 independent review (IN PROGRESS).
 
 ## Log (newest first)
 
+- 2026-11-21 ~16:10 — Muse Abdelmajid: map D rebase built (134 checks,
+  0 errors; perf judged shippable). Builder found a REAL tap bug
+  (camera inside a shop hit cylinder → tap opens the shop instead of
+  walking, all maps, since v1.5) — parent fix applied in pickShop,
+  rides with v1.9.0. In independent review now.
 - 2026-11-21 ~14:44 — Muse Abdelmajid: v1.8.0 live-verified 187/194,
   0 product defects (7 fails proven harness defects). Map C + bubble
   fix confirmed live (bubble ~95–100px from player's head, was ~35px).
