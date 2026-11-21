@@ -38,9 +38,10 @@ import { buildCharacter, fitHeight, buildArticulatedFemale, tintArticulated } fr
 import { PROFILES, getProfile, saveProfileOverride, resetProfileOverride } from './profiles.js';
 import { getAppearance, getStoredAppearance, saveAppearance, diffAppearance, tintVRM } from './appearance.js';
 import { accountStore, validateSignup } from './account.js';
-// v1.5: map modules — one import per shipped map (A + B in 1.5.1).
+// v1.5: map modules — one import per shipped map (A + B + C in 1.8.0).
 import { MAP as MAP_A } from './map-a.js';
 import { MAP as MAP_B } from './map-b.js';
+import { MAP as MAP_C } from './map-c.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -176,7 +177,7 @@ const homeScreen = (() => {
 // reads env/bounds/start/title from the selected entry, and the picker
 // (mapUI) renders MAPS as-is. The selection persists in localStorage
 // ('suli-map'); an unknown stored id falls back to the first map.
-const MAPS = [MAP_A, MAP_B];
+const MAPS = [MAP_A, MAP_B, MAP_C];
 const MAP_KEY = 'suli-map';
 function selectedMapId() {
   try {
@@ -281,7 +282,13 @@ function makeWalkScreen(opts) {
     const b = opts.bounds;
     if (x < b.minX + margin || x > b.maxX - margin || z < b.minZ + margin || z > b.maxZ - margin) return false;
     const r = opts.river;
-    if (r && !allowRiver && x > r.min - 0.3 && x < r.max + 0.3) return false;
+    // v1.8: the river band runs on ONE axis — x for A/B (river N-S),
+    // z for C (river E-W). `axis` defaults to 'x', so A/B's contract
+    // (no axis field) is unchanged.
+    if (r && !allowRiver) {
+      const c = r.axis === 'z' ? z : x;
+      if (c > r.min - 0.3 && c < r.max + 0.3) return false;
+    }
     if (colliders) {
       for (const c of colliders) {
         if (Math.hypot(x - c.x, z - c.z) < c.r + margin) return false;
@@ -298,7 +305,8 @@ function makeWalkScreen(opts) {
   function npcBank(p) {
     const r = opts.river;
     if (!r) return 0;
-    return p.x < r.min ? -1 : (p.x > r.max ? 1 : 0);
+    const c = r.axis === 'z' ? p.z : p.x; // v1.8: band axis (x for A/B, z for C)
+    return c < r.min ? -1 : (c > r.max ? 1 : 0);
   }
   // Legs for a walk from `from` to `to`. Same bank (or no river) = direct.
   // Other bank = staging (near bank, on the bridge axis) -> deck centre
@@ -313,10 +321,18 @@ function makeWalkScreen(opts) {
     if (!r) return [to];
     const b1 = npcBank(from), b2 = npcBank(to);
     if (b1 === 0 || b2 === 0 || b1 === b2) return [to];
-    const bz = r.bridge.z;
-    const stage = { x: b1 < 0 ? r.min - 2.0 : r.max + 2.0, z: bz };
-    const land = { x: b2 < 0 ? r.min - 2.0 : r.max + 2.0, z: bz };
-    const deck = { x: r.bridge.x, z: bz };
+    // v1.8: the staging/landing points sit ON the bridge axis (the river's
+    // OTHER axis) — bridge.z for an x-band river (A/B), bridge.x for a
+    // z-band river (C) — 2.0 past the near/far bank edge.
+    let stage, land;
+    if (r.axis === 'z') {
+      stage = { x: r.bridge.x, z: b1 < 0 ? r.min - 2.0 : r.max + 2.0 };
+      land = { x: r.bridge.x, z: b2 < 0 ? r.min - 2.0 : r.max + 2.0 };
+    } else {
+      stage = { x: b1 < 0 ? r.min - 2.0 : r.max + 2.0, z: r.bridge.z };
+      land = { x: b2 < 0 ? r.min - 2.0 : r.max + 2.0, z: r.bridge.z };
+    }
+    const deck = { x: r.bridge.x, z: r.bridge.z };
     const place = (pt, allowRiver) => {
       const tries = [[0, 0], [0, 0.8], [0, -0.8], [0.5, 0], [-0.5, 0], [0, 1.5], [0, -1.5]];
       for (const t of tries) {
@@ -448,15 +464,17 @@ function makeWalkScreen(opts) {
     const phrases = NPC_GREETINGS[best.key] || NPC_GREETINGS.sara;
     if (greetKey !== best.key) { greetKey = best.key; greetIdx = 0; greetUntil = now + 4000; }
     else if (now > greetUntil) { greetIdx = (greetIdx + 1) % phrases.length; greetUntil = now + 4000; }
-    // Anchor just above the head (head top ~1.37 after fitHeight): the
-    // first anchor (2.05) floated the bubble ~100px above the NPC at
-    // close range — the camera looks down, so height reads large on
-    // screen — and the bubble looked detached from its speaker (seen in
-    // the run-5 screenshots, proven by the bubble diagnostic: bubble
-    // bottom 118px vs the NPC's head at ~211px). 1.60 leaves a ~35px
-    // speech-bubble gap at close range, less further away, and never
-    // touches the head even at the top of the walk bob.
-    const v = new THREE.Vector3(best.walker.position.x, 1.60, best.walker.position.z);
+    // v1.8 FIX (live-test 1.7.0 cosmetic): the bubble used to anchor at a
+    // FIXED world height (1.60) above the NPC's feet. The camera looks
+    // down, so at close range that height reads as a large screen gap —
+    // when the greeting NPC stood between the camera and the player, the
+    // bubble floated above the PLAYER's head instead of the speaker's
+    // (live-test L3-02: bubble centre 149px above Sara's head, ~35px
+    // from Kaito's). Anchor to the speaker's PROJECTED HEAD instead
+    // (head top ~1.37 after fitHeight): the bubble's bottom
+    // (translate(-50%,-100%)) sits a fixed 14px above the head-top point
+    // on screen, so it stays attached to its speaker at any distance.
+    const v = new THREE.Vector3(best.walker.position.x, 1.37, best.walker.position.z);
     v.project(camera);
     const r = renderer.domElement.getBoundingClientRect();
     if (v.z > 1 || Math.abs(v.x) > 1.05 || Math.abs(v.y) > 1.05) {
@@ -469,7 +487,8 @@ function makeWalkScreen(opts) {
     // so a long phrase near the screen edge never overflows the viewport.
     const half = (el.offsetWidth || 140) / 2 + 8;
     const px = Math.max(half, Math.min(r.width - half, (v.x + 1) / 2 * r.width));
-    const py = Math.max(60, Math.min(r.height - 160, (1 - v.y) / 2 * r.height));
+    // v is the head-top point now: the bubble's bottom sits 14px above it.
+    const py = Math.max(60, Math.min(r.height - 160, (1 - v.y) / 2 * r.height - 14));
     el.style.left = px + 'px';
     el.style.top = py + 'px';
   }
@@ -504,11 +523,16 @@ function makeWalkScreen(opts) {
         n.walker.position.x = Math.max(opts.bounds.minX, Math.min(opts.bounds.maxX, n.walker.position.x));
         n.walker.position.z = Math.max(opts.bounds.minZ, Math.min(opts.bounds.maxZ, n.walker.position.z));
         // river guard: separation pushes can nudge an NPC a few cm into
-        // the water's edge — while inside the band, clamp z into the open
-        // deck corridor so the NPC never stands in water (the deck legs
-        // already run on the bridge axis, so this only ever bites on a
-        // sideways nudge).
-        if (r && n.walker.position.x > r.min && n.walker.position.x < r.max) {
+        // the water's edge — while inside the band, clamp the bridge-axis
+        // coordinate into the open deck corridor so the NPC never stands
+        // in water (the deck legs already run on the bridge axis, so this
+        // only ever bites on a sideways nudge). v1.8: the clamped axis is
+        // z for an x-band river (A/B), x for a z-band river (C).
+        if (r && r.axis === 'z') {
+          if (n.walker.position.z > r.min && n.walker.position.z < r.max) {
+            n.walker.position.x = Math.max(r.bridge.x - r.gap, Math.min(r.bridge.x + r.gap, n.walker.position.x));
+          }
+        } else if (r && n.walker.position.x > r.min && n.walker.position.x < r.max) {
           n.walker.position.z = Math.max(r.bridge.z - r.gap, Math.min(r.bridge.z + r.gap, n.walker.position.z));
         }
         // arrival: the Player clears its target within 0.18 of it
@@ -818,7 +842,7 @@ const villageScreen = makeWalkScreen({
   env: ACTIVE_MAP.buildEnv, // v1.5: env/bounds/start come from the selected map
   bounds: ACTIVE_MAP.bounds,
   start: ACTIVE_MAP.start,
-  river: ACTIVE_MAP.river, // v1.7: river x-band + bridge point (NPC crossing)
+  river: ACTIVE_MAP.river, // v1.7: river band + bridge point (NPC crossing; x-band for A/B, z-band for C)
   // v1.4.1: closer follow camera (was 4.6) — Kaito reads bigger and
   // sharper on the phone. Height unchanged (2.7), so the camera still
   // passes under the torii beams (y 2.95/3.42).
@@ -1850,7 +1874,7 @@ const socialUI = (() => {
 })();
 
 // ================= MAP PICKER (v1.5) =================
-// Lists the maps in the registry (MAPS) — A + B in 1.5.1; C/D appear
+// Lists the maps in the registry (MAPS) — A + B + C in 1.8.0; D appears
 // here automatically once registered. Switching saves 'suli-map' and
 // reloads (same pattern as the quality setting: the village screen is
 // built once per load from the selected map). Choosing the current map
@@ -2149,7 +2173,7 @@ const screens = {
 let current = 'home';
 
 window.__suli = {
-  version: '1.7.0',
+  version: '1.8.0',
   screen: 'home',
   ready: {},
   playerPos: (name) => {
